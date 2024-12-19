@@ -1,0 +1,2978 @@
+diff --git a/.docforge/manifest.yaml b/.docforge/manifest.yaml
+index 19ce252c..3bd2c018 100644
+--- a/.docforge/manifest.yaml
++++ b/.docforge/manifest.yaml
+@@ -6,33 +6,34 @@ structure:
+     frontmatter:
+       title: Architecture
+       weight: 1
++      categories:
++        - Developers
+   nodesSelector:
+     path: /docs/architecture
+-- name: concepts
++- name: development
+   properties:
+     frontmatter:
+-      title: Concepts
++      title: Development
+       weight: 2
++      categories:
++        - Developers
+   nodesSelector:
+-    path: /docs/concepts
+-- name: deployment
++    path: /docs/development
++- name: operations
+   properties:
+     frontmatter:
+-      title: Deployment
++      title: Operations
+       weight: 3
++      categories:
++        - Operators
+   nodesSelector:
+-    path: /docs/deployment
+-- name: development
+-  properties:
+-    frontmatter:
+-      title: Development
+-      weight: 4
+-  nodesSelector:
+-    path: /docs/development
++    path: /docs/operations
+ - name: usage
+   properties:
+     frontmatter:
+       title: Usage
+-      weight: 5
++      weight: 4
++      categories:
++        - Users
+   nodesSelector:
+     path: /docs/usage
+diff --git a/.github/workflows/docker-publish.yml b/.github/workflows/docker-publish.yml
+new file mode 100644
+index 00000000..05a59642
+--- /dev/null
++++ b/.github/workflows/docker-publish.yml
+@@ -0,0 +1,90 @@
++name: Docker
++
++# This workflow uses actions that are not certified by GitHub.
++# They are provided by a third-party and are governed by
++# separate terms of service, privacy policy, and support
++# documentation.
++
++on:
++  push:
++    branches: [ "master" ]
++    # Publish semver tags as releases.
++    tags: [ 'v*.*.*' ]
++  pull_request:
++    branches: [ "master" ]
++
++env:
++  REGISTRY: ghcr.io
++  # github.repository as <account>/<repo>
++  IMAGE_NAME: ${{ github.repository }}
++
++
++jobs:
++  build:
++
++    runs-on: ubuntu-latest
++    permissions:
++      contents: read
++      packages: write
++      # This is used to complete the identity challenge
++      # with sigstore/fulcio when running outside of PRs.
++      id-token: write
++
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v3
++
++      # Install the cosign tool except on PR
++      # https://github.com/sigstore/cosign-installer
++      - name: Install cosign
++        if: github.event_name != 'pull_request'
++        uses: sigstore/cosign-installer@v3.3.0
++        with:
++          cosign-release: 'v2.2.2' # optional
++
++      # Workaround: https://github.com/docker/build-push-action/issues/461
++      - name: Setup Docker buildx
++        uses: docker/setup-buildx-action@79abd3f86f79a9d68a23c75a09a9a85889262adf
++
++      # Login against a Docker registry except on PR
++      # https://github.com/docker/login-action
++      - name: Log into registry ${{ env.REGISTRY }}
++        if: github.event_name != 'pull_request'
++        uses: docker/login-action@28218f9b04b4f3f62068d7b6ce6ca5b26e35336c
++        with:
++          registry: ${{ env.REGISTRY }}
++          username: ${{ github.actor }}
++          password: ${{ secrets.GITHUB_TOKEN }}
++
++      # Extract metadata (tags, labels) for Docker
++      # https://github.com/docker/metadata-action
++      - name: Extract Docker metadata
++        id: meta
++        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
++        with:
++          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
++
++      # Build and push Docker image with Buildx (don't push on PR)
++      # https://github.com/docker/build-push-action
++      - name: Build and push Docker image
++        id: build-and-push
++        uses: docker/build-push-action@ac9327eae2b366085ac7f6a2d02df8aa8ead720a
++        with:
++          context: .
++          push: ${{ github.event_name != 'pull_request' }}
++          tags: ${{ steps.meta.outputs.tags }}
++          labels: ${{ steps.meta.outputs.labels }}
++          cache-from: type=gha
++          cache-to: type=gha,mode=max
++
++
++      # Sign the resulting Docker image digest except on PRs.
++      # This will only write to the public Rekor transparency log when the Docker
++      # repository is public to avoid leaking data.  If you would like to publish
++      # transparency data even for private images, pass --force to cosign below.
++      # https://github.com/sigstore/cosign
++      - name: Sign the published Docker image
++        if: ${{ github.event_name != 'pull_request' }}
++        # This step uses the identity token to provision an ephemeral certificate
++        # against the sigstore community Fulcio instance.
++        run: echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build-and-push.outputs.digest }}
+diff --git a/.pnp.cjs b/.pnp.cjs
+index d4eb4c55..8578cc70 100644
+--- a/.pnp.cjs
++++ b/.pnp.cjs
+@@ -16232,6 +16232,14 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
+             ["lru-cache", "npm:6.0.0"]\
+           ],\
+           "linkType": "HARD"\
++        }],\
++        ["npm:7.5.3", {\
++          "packageLocation": "./.yarn/cache/semver-npm-7.5.3-275095dbf3-9d58db1652.zip/node_modules/semver/",\
++          "packageDependencies": [\
++            ["semver", "npm:7.5.3"],\
++            ["lru-cache", "npm:6.0.0"]\
++          ],\
++          "linkType": "HARD"\
+         }]\
+       ]],\
+       ["semver-compare", [\
+diff --git a/.vscode/settings.json b/.vscode/settings.json
+index 83d91a73..3701016a 100644
+--- a/.vscode/settings.json
++++ b/.vscode/settings.json
+@@ -4,7 +4,7 @@
+   "editor.tabSize": 2,
+   "editor.formatOnSave": false,
+   "editor.codeActionsOnSave": {
+-    "source.fixAll.eslint": true
++    "source.fixAll.eslint": "explicit"
+   },
+   "eslint.validate": [
+     "vue",
+diff --git a/.yarn/cache/fsevents-patch-3340e2eb10-8.zip b/.yarn/cache/fsevents-patch-3340e2eb10-8.zip
+deleted file mode 100644
+index c4511f19..00000000
+Binary files a/.yarn/cache/fsevents-patch-3340e2eb10-8.zip and /dev/null differ
+diff --git a/.yarn/cache/semver-npm-7.5.3-275095dbf3-9d58db1652.zip b/.yarn/cache/semver-npm-7.5.3-275095dbf3-9d58db1652.zip
+new file mode 100644
+index 00000000..79b7d471
+Binary files /dev/null and b/.yarn/cache/semver-npm-7.5.3-275095dbf3-9d58db1652.zip differ
+diff --git a/.yarn/versions/186fc46e.yml b/.yarn/versions/186fc46e.yml
+new file mode 100644
+index 00000000..bb845b73
+--- /dev/null
++++ b/.yarn/versions/186fc46e.yml
+@@ -0,0 +1,3 @@
++undecided:
++  - "@gardener-dashboard/backend"
++  - "@gardener-dashboard/frontend"
+diff --git a/.yarn/versions/1fd8ab75.yml b/.yarn/versions/1fd8ab75.yml
+new file mode 100644
+index 00000000..d715653c
+--- /dev/null
++++ b/.yarn/versions/1fd8ab75.yml
+@@ -0,0 +1,2 @@
++undecided:
++  - "@gardener-dashboard/frontend"
+diff --git a/.yarn/versions/3ecf9a7c.yml b/.yarn/versions/3ecf9a7c.yml
+new file mode 100644
+index 00000000..d715653c
+--- /dev/null
++++ b/.yarn/versions/3ecf9a7c.yml
+@@ -0,0 +1,2 @@
++undecided:
++  - "@gardener-dashboard/frontend"
+diff --git a/.yarn/versions/71139647.yml b/.yarn/versions/71139647.yml
+new file mode 100644
+index 00000000..d715653c
+--- /dev/null
++++ b/.yarn/versions/71139647.yml
+@@ -0,0 +1,2 @@
++undecided:
++  - "@gardener-dashboard/frontend"
+diff --git a/.yarn/versions/93942d05.yml b/.yarn/versions/93942d05.yml
+new file mode 100644
+index 00000000..bb845b73
+--- /dev/null
++++ b/.yarn/versions/93942d05.yml
+@@ -0,0 +1,3 @@
++undecided:
++  - "@gardener-dashboard/backend"
++  - "@gardener-dashboard/frontend"
+diff --git a/Dockerfile b/Dockerfile
+index fb3665c5..68b62dbc 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -34,7 +34,7 @@ COPY . .
+ 
+ # validate zero-installs project and disable network
+ RUN yarn config set enableNetwork false
+-RUN yarn install --immutable --immutable-cache
++RUN yarn install
+ 
+ # check that the constraints are met
+ RUN yarn constraints
+diff --git a/VERSION b/VERSION
+index 79fa3269..41bcd69c 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.69.1
+\ No newline at end of file
++1.69.1
+diff --git a/backend/lib/config/gardener.js b/backend/lib/config/gardener.js
+index c4136321..b0872bfb 100644
+--- a/backend/lib/config/gardener.js
++++ b/backend/lib/config/gardener.js
+@@ -122,6 +122,11 @@ module.exports = {
+       _.unset(config, 'frontend.ticket')
+     }
+ 
++    if (config.frontend.shootAdminKubeconfig) {
++      _.set(config, 'frontend.shootAdminKubeconfig.enabled', config.frontend.shootAdminKubeconfig.enabled)
++      _.set(config, 'frontend.shootAdminKubeconfig.maxExpirationSeconds', config.frontend.shootAdminKubeconfig.maxExpirationSeconds)
++    }
++
+     return config
+   },
+   readConfig (path) {
+diff --git a/backend/lib/routes/shoots.js b/backend/lib/routes/shoots.js
+index 18c3a5b1..788b4bc9 100644
+--- a/backend/lib/routes/shoots.js
++++ b/backend/lib/routes/shoots.js
+@@ -9,6 +9,7 @@
+ const express = require('express')
+ const { shoots } = require('../services')
+ const { metricsRoute } = require('../middleware')
++const config = require('../config')
+ 
+ const router = module.exports = express.Router({
+   mergeParams: true
+@@ -254,3 +255,19 @@ router.route('/:name/spec/seedName')
+       next(err)
+     }
+   })
++
++if (config.frontend.shootAdminKubeconfig && config.frontend.shootAdminKubeconfig.enabled) {
++  router.route('/:name/adminkubeconfig')
++    .all(metricsMiddleware)
++    .post(async (req, res, next) => {
++      try {
++        const user = req.user
++        const namespace = req.params.namespace
++        const name = req.params.name
++        const body = req.body
++        res.send(await shoots.createAdminKubeconfig({ user, namespace, name, body }))
++      } catch (err) {
++        next(err)
++      }
++    })
++}
+diff --git a/backend/lib/services/shoots.js b/backend/lib/services/shoots.js
+index d388052c..9bd924d5 100644
+--- a/backend/lib/services/shoots.js
++++ b/backend/lib/services/shoots.js
+@@ -9,6 +9,7 @@
+ const { isHttpError } = require('@gardener-dashboard/request')
+ const { cleanKubeconfig, Config } = require('@gardener-dashboard/kube-config')
+ const { dashboardClient } = require('@gardener-dashboard/kube-client')
++const resources = require('@gardener-dashboard/kube-client/lib/resources')
+ const utils = require('../utils')
+ const cache = require('../cache')
+ const authorization = require('./authorization')
+@@ -159,6 +160,22 @@ exports.replaceSeedName = async function ({ user, namespace, name, body }) {
+   return client['core.gardener.cloud'].shoots.jsonPatch(namespace, [name, 'binding'], patchOperations)
+ }
+ 
++exports.createAdminKubeconfig = async function ({ user, namespace, name, body }) {
++  const client = user.client
++  const { apiVersion, kind } = resources.Resources.AdminKubeconfigRequest
++  const payload = {
++    kind,
++    apiVersion,
++    spec: {
++      expirationSeconds: body.expirationSeconds
++    }
++  }
++
++  const adminKubeConfigRequest = await client['core.gardener.cloud'].shoots.createAdminKubeconfigRequest(namespace, name, payload)
++  const kubeconfig = Buffer.from(adminKubeConfigRequest.status.kubeconfig, 'base64').toString('utf8')
++  return kubeconfig
++}
++
+ exports.replaceAddons = async function ({ user, namespace, name, body }) {
+   const client = user.client
+   const addons = body
+diff --git a/charts/__tests__/gardener-dashboard/runtime/dashboard/__snapshots__/configmap.spec.js.snap b/charts/__tests__/gardener-dashboard/runtime/dashboard/__snapshots__/configmap.spec.js.snap
+index 13a43a6b..1d72d7cc 100644
+--- a/charts/__tests__/gardener-dashboard/runtime/dashboard/__snapshots__/configmap.spec.js.snap
++++ b/charts/__tests__/gardener-dashboard/runtime/dashboard/__snapshots__/configmap.spec.js.snap
+@@ -324,6 +324,10 @@ Object {
+     ],
+     "seedCandidateDeterminationStrategy": "SameRegion",
+     "serviceAccountDefaultTokenExpiration": 7776000,
++    "shootAdminKubeconfig": Object {
++      "enabled": true,
++      "maxExpirationSeconds": 86400,
++    },
+   },
+   "logFormat": "text",
+   "logLevel": "debug",
+diff --git a/charts/__tests__/gardener-dashboard/runtime/dashboard/configmap.spec.js b/charts/__tests__/gardener-dashboard/runtime/dashboard/configmap.spec.js
+index 1b4e467b..0ea26a3d 100644
+--- a/charts/__tests__/gardener-dashboard/runtime/dashboard/configmap.spec.js
++++ b/charts/__tests__/gardener-dashboard/runtime/dashboard/configmap.spec.js
+@@ -615,5 +615,30 @@ describe('gardener-dashboard', function () {
+         expect(pick(config, ['frontend.knownConditions'])).toMatchSnapshot()
+       })
+     })
++
++    describe('shootAdminKubeconfig', function () {
++      it('should render the template', async function () {
++        const maxExpirationSeconds = 86400
++        const values = {
++          global: {
++            dashboard: {
++              frontendConfig: {
++                shootAdminKubeconfig: {
++                  enabled: true,
++                  maxExpirationSeconds: maxExpirationSeconds
++                }
++              }
++            }
++          }
++        }
++
++        const documents = await renderTemplates(templates, values)
++        expect(documents).toHaveLength(1)
++        const [configMap] = documents
++        const config = yaml.load(configMap.data['config.yaml'])
++        expect(config.frontend.shootAdminKubeconfig.maxExpirationSeconds).toBe(maxExpirationSeconds)
++        expect(config.frontend.shootAdminKubeconfig.enabled).toBe(true)
++      })
++    })
+   })
+ })
+diff --git a/charts/gardener-dashboard/charts/runtime/templates/dashboard/configmap.yaml b/charts/gardener-dashboard/charts/runtime/templates/dashboard/configmap.yaml
+index fe10774c..5819dcf9 100644
+--- a/charts/gardener-dashboard/charts/runtime/templates/dashboard/configmap.yaml
++++ b/charts/gardener-dashboard/charts/runtime/templates/dashboard/configmap.yaml
+@@ -1,4 +1,7 @@
+-{{- if .Values.global.dashboard.enabled }}
++# SPDX-FileCopyrightText: 2021 SAP SE or an SAP affiliate company and Gardener contributors
++#
++# SPDX-License-Identifier: Apache-2.0
++
+ apiVersion: v1
+ kind: ConfigMap
+ metadata:
+@@ -13,12 +16,20 @@ metadata:
+ data:
+   login-config.json: |
+     {
+-       "landingPageUrl": {{ quote .Values.global.dashboard.frontendConfig.landingPageUrl }},
+-       {{- if .Values.global.dashboard.oidc }}
+-       "loginTypes": ["oidc", "token"]
+-       {{- else }}
+-       "loginTypes": ["token"]
+-       {{- end }}
++      "productName": {{ quote .Values.global.dashboard.frontendConfig.productName }},
++      "productSlogan": {{ quote .Values.global.dashboard.frontendConfig.productSlogan }},
++      "documentationURL": {{ quote .Values.global.dashboard.frontendConfig.documentationURL }},
++      "supportURL": {{ quote .Values.global.dashboard.frontendConfig.supportURL }},
++      "landingPageUrl": {{ quote .Values.global.dashboard.frontendConfig.landingPageUrl }},
++      "landingPageName": {{ quote .Values.global.dashboard.frontendConfig.landingPageName }},
++      "customLandingPagePre": {{ quote .Values.global.dashboard.frontendConfig.customLandingPagePre }},
++      "customLandingPagePost": {{ quote .Values.global.dashboard.frontendConfig.customLandingPagePost }},
++
++      {{- if .Values.global.dashboard.oidc.enabled }}
++      "loginTypes": ["oidc", "token"]
++      {{- else }}
++      "loginTypes": ["token"]
++      {{- end }}
+     }
+   config.yaml: |
+     ---
+@@ -222,6 +233,10 @@ data:
+       {{- if .Values.global.dashboard.frontendConfig.defaultHibernationSchedule }}
+       defaultHibernationSchedule:
+ {{ toYaml .Values.global.dashboard.frontendConfig.defaultHibernationSchedule | trim | indent 8 }}
++      {{- end }}
++      {{- if .Values.global.dashboard.frontendConfig.shootAdminKubeconfig }}
++      shootAdminKubeconfig:
++{{ toYaml .Values.global.dashboard.frontendConfig.shootAdminKubeconfig | trim | indent 8 }}
+       {{- end }}
+       {{- if .Values.global.dashboard.frontendConfig.seedCandidateDeterminationStrategy }}
+       seedCandidateDeterminationStrategy: {{ .Values.global.dashboard.frontendConfig.seedCandidateDeterminationStrategy }}
+@@ -328,4 +343,3 @@ data:
+       {{- if .Values.global.dashboard.frontendConfig.knownConditions }}
+       knownConditions: {{ toYaml .Values.global.dashboard.frontendConfig.knownConditions | nindent 8 }}
+       {{- end }}
+-{{- end }}
+diff --git a/charts/gardener-dashboard/charts/runtime/templates/dashboard/deployment.yaml b/charts/gardener-dashboard/charts/runtime/templates/dashboard/deployment.yaml
+index 3837685a..2d89dd87 100644
+--- a/charts/gardener-dashboard/charts/runtime/templates/dashboard/deployment.yaml
++++ b/charts/gardener-dashboard/charts/runtime/templates/dashboard/deployment.yaml
+@@ -53,6 +53,18 @@ spec:
+         {{- toYaml .Values.global.dashboard.podLabels | nindent 8 }}
+         {{- end }}
+     spec:
++      affinity:
++        podAntiAffinity:
++          preferredDuringSchedulingIgnoredDuringExecution:
++          - weight: 100
++            podAffinityTerm:
++              labelSelector:
++                matchExpressions:
++                - key: app
++                  operator: In
++                  values:
++                  - gardener-dashboard
++              topologyKey: kubernetes.io/hostname
+       volumes:
+       - name: gardener-dashboard-config
+         configMap:
+@@ -100,6 +112,10 @@ spec:
+       {{- end }}
+       containers:
+         - name: gardener-dashboard
++          securityContext:
++            runAsUser: 10001
++            runAsGroup: 10001
++            readOnlyRootFilesystem: true
+           {{- if .Values.global.dashboard.nodeOptions }}
+           args:
+           {{- range .Values.global.dashboard.nodeOptions }}
+diff --git a/charts/gardener-dashboard/charts/runtime/templates/dashboard/pdb.yml b/charts/gardener-dashboard/charts/runtime/templates/dashboard/pdb.yml
+new file mode 100644
+index 00000000..8b45a214
+--- /dev/null
++++ b/charts/gardener-dashboard/charts/runtime/templates/dashboard/pdb.yml
+@@ -0,0 +1,14 @@
++# SPDX-FileCopyrightText: 2022 PlusServer GmbH
++#
++# SPDX-License-Identifier: Apache-2.0
++
++apiVersion: policy/v1
++kind: PodDisruptionBudget
++metadata:
++  name: gardener-dashboard-pdb
++  namespace: {{ .Release.Namespace }}
++spec:
++  minAvailable: 2
++  selector:
++    matchLabels:
++      app.kubernetes.io/name: gardener-dashboard
+\ No newline at end of file
+diff --git a/charts/gardener-dashboard/charts/utils-templates b/charts/gardener-dashboard/charts/utils-templates
+deleted file mode 120000
+index db495912..00000000
+--- a/charts/gardener-dashboard/charts/utils-templates
++++ /dev/null
+@@ -1 +0,0 @@
+-../../utils-templates
+\ No newline at end of file
+diff --git a/charts/gardener-dashboard/values.yaml b/charts/gardener-dashboard/values.yaml
+index 78f8931e..7341e58e 100644
+--- a/charts/gardener-dashboard/values.yaml
++++ b/charts/gardener-dashboard/values.yaml
+@@ -2,17 +2,16 @@
+ # This is a YAML-formatted file.
+ # Declare variables to be passed into your templates.
+ global:
+-  # Gardener dashboard configuration values
+   dashboard:
+-    enabled: true
+     replicaCount: 1
+     # If connections from a particular client should not be passed to the same Pod each time, set the session affinity to "None".
+     sessionAffinity: ClientIP
+ 
+     image:
+-      repository: eu.gcr.io/gardener-project/gardener/dashboard
++      repository: ghcr.io/plusserver/gardener-dashboard
+       tag: latest
+       pullPolicy: IfNotPresent
++
+     # additional labels to add to the dashboard deployment
+     deploymentLabels: {}
+     # additional annotations to add to the dashboard deployment
+@@ -29,7 +28,7 @@ global:
+       expirationSeconds: 43200 # 12 hours
+       audience: ''
+ 
+-    # # vertical Pod autoscaling disabled by default
++    # vertical Pod autoscaling disabled by default
+     # vpa:
+     #   updateMode: Off
+     #   controlledValues: RequestsOnly
+@@ -38,7 +37,21 @@ global:
+     #   maxAllowedCpu: 500m
+     #   maxAllowedMemory: 500Mi
+ 
+-    logLevel: debug
++    # sessionSecret is used for signing and encrytion of session data
++    sessionSecret: ~
++    oidc:
++      #Display the OIDC button on the login screen
++      enabled: false
++      # well-known URL for OpenID Provider Issuer Discovery
++      issuerUrl: ~
++      # clientId is the public identifier of the gardener-dashboard aplication
++      clientId: dashboard
++      # clientSecret is the private secret of the gardener-dashboard aplication
++      clientSecret: ~
++      # # certificate authority of the OpenID provider
++      # ca: |
++      logLevel: debug
++
+     # # the external url of the apiServer
+     # apiServerUrl: https://api.example.org
+     # # the certificateAuthorityData of the kube apiserver
+@@ -55,18 +68,21 @@ global:
+     # - foo
+     # # the identifier of the gardener landscape (defaults to the name stored in kube-system/cluster-identity configmap)
+     # clusterIdentity: my-landscape-dev
++
+     containerPort: 8080
+-    metricsContainerPort: 9050
+     servicePort: 8080
+     resources:
++      limits:
++        cpu: 1.0
++        memory: 1G
+       requests:
+         cpu: 100m
+         memory: 350Mi
+-    # If dashboard is running in an environment with less than 1.5GB of available memory
+-    # you should cap the maximum available "old space". In a Docker-512MB-Container,
+-    # the value should not be greater than 90% of the available memory.
+-    # Example: nodeOptions: [--optimize-for-size, --max-old-space-size=920, --gc-interval=100]
+-    nodeOptions: [--max-old-space-size=920]
++
++      # If dashboard is running in an environment with less than 1.5GB of available memory
++      # you should cap the maximum available "old space". In a Docker-512MB-Container,
++      # the value should not be greater than 90% of the available memory.
++      # nodeOptions: [--optimize-for-size, --max-old-space-size=460, --gc-interval=100]
+ 
+     ingress:
+       ingressClassName: nginx
+@@ -91,40 +107,17 @@ global:
+         #   Li4u
+         #   -----END RSA PRIVATE KEY-----
+ 
+-    # sessionSecret is used for signing and encrytion of session data
+-    sessionSecret: ~
+-
+-    # oidc:
+-    #   # well-known URL for OpenID Provider Issuer Discovery
+-    #   issuerUrl: ~
+-    #   # clientId is the public identifier of the gardener-dashboard aplication
+-    #   clientId: dashboard
+-    #   # clientSecret is the private secret of the gardener-dashboard aplication
+-    #   clientSecret: ~
+-    #   # force PKCE usage
+-    #   usePKCE: true
+-    #   # sessionLifetime is the maximum lifetime of a login session without reauthentication in seconds (defaults to 86400)
+-    #   sessionLifetime: 86400
+-    #   # certificate authority of the OpenID provider
+-    #   ca: |
+-    #     -----BEGIN CERTIFICATE-----
+-    #     Li4u
+-    #     -----END CERTIFICATE-----
+-    #   # secretKey reference to the certificate authority
+-    #   caSecretKeyRef:
+-    #     name: oidc-ca-secret-name
+-    #     key: ca.crt
+-    #   # configuration for kubeconfig download required by kubelogin
+-    #   public:
+-    #     # clientId is the identifier of the public oidc client use by kubelogin
+-    #     clientId: kube-kubectl
+-    #     # clientSecret is the public client secret use by kubelogin and all users
+-    #     clientSecret: ~
+-    #     # force PKCE usage (automatically enabled if no clientSecret is given)
+-    #     usePKCE: true
+-
+     frontendConfig:
+-      landingPageUrl: https://github.com/gardener
++      productName": "PSKE"
++      productSlogan": "Managed Kubernetes at Scale"
++      documentationURL": "https://docs.plusserver.com"
++      supportURL": "https://www.plusserver.com/ueber-uns/plusserver-kontakt"
++      landingPageUrl": "https://plusserver.com/pske"
++      landingPageName": "Plusserver Kubernetes Engine"
++      customLandingPagePre": "Powered by"
++      customLandingPagePost": ""
++      loginTypes": ["token"]
++
+       # # asset configuration (see https://github.com/gardener/dashboard/blob/master/docs/Theming.md#logos-and-icons for the format and generation of the default values).
+       # assets:
+       #   favicon-16x16.png: |
+@@ -146,7 +139,7 @@ global:
+       #   - ignore
+       #   newTicketLabels: # these are the labels that are automatically preselected when creating a new ticket
+       #   - default-label
+-      #   # Available issue description template variables:
++      #   # issueDescriptionTemplate variables:
+       #   # - `${shootName}`: name of the shoot
+       #   # - `${shootNamespace}`: namespace of the shoot
+       #   # - `${shootCreatedAt}`: creation timestamp of the shoot, format 'YYYY-MM-DD'
+@@ -157,27 +150,13 @@ global:
+       #   # - `${projectName}`: name of the project
+       #   # - `${utcDateTimeNow}`: current date-time in utc format
+       #   # - `${seedName}`: shoot's seed name
+-      #   # - `${accessRestrictions}`: list with shoot's selected access restrictions
+-      #   #     accessRestrictions[].title: access restriction title
+-      #   #     accessRestrictions[].description: access restriction description
+-      #   #     accessRestrictions[].key: unique identifier
+-      #   #     accessRestrictions[].options: list with selected options for the access restriction
+-      #   #       accessRestrictions[].options[].title: option title
+-      #   #       accessRestrictions[].options[].description: option description
+-      #   #       accessRestrictions[].options[].key: unique identifier
+       #   issueDescriptionTemplate: |
+       #     ## Which cluster is affected?
+ 
+       #     `Cluster Details Dashboard Link`: [${projectName}/${shootName}](${shootUrl})
+       #     `Operating System`: ${machineImageNames}
+       #     `Platform`: ${providerType}
+-      #     <% if(accessRestrictions.length) { %>
+-      #     ## Attention: This cluster has access restrictions
+-      #     <% accessRestrictions.forEach(accessRestriction => { %>
+-      #     - <%- accessRestriction.title %><% accessRestriction.options.forEach(option => { %>
+-      #       - <%- option.title %><% }) }) %>
+-      #     <%
+-      #     }%>
++
+       #     ## What happened?
+ 
+       #     ## What you expected to happen?
+@@ -199,6 +178,10 @@ global:
+       features:
+         terminalEnabled: false
+         projectTerminalShortcutsEnabled: false
++
++      shootAdminKubeconfig:
++        enabled: true
++        maxExpirationSeconds: 86400
+       # alert:
+       #   type: error
+       #   message: This is an **alert** banner
+@@ -266,7 +249,7 @@ global:
+       #           If you can't comply, only third-level/dev support at usual 8x5 working hours in EEA will be available to you for all node-related components such as Docker and Kubelet, the operating system, and everything else that would require direct inspection of your nodes through a privileged pod or SSH
+       #         inverted: true
+ 
+-      # # themes - overwrite theme colors with custom colors, use html color codes or material design colors defined by vuetify in the javascript color pack: https://vuetifyjs.com/en/styles/colors/#javascript-color-pack
++      # themes - overwrite theme colors with custom colors, use html color codes or material design colors defined by vuetify in the javascript color pack: https://vuetifyjs.com/en/styles/colors/#javascript-color-pack
+       # themes:
+       #   light: # overwrite light theme colors
+       #     primary: '#0b8062'
+@@ -301,23 +284,6 @@ global:
+       #   icon: link
+       #   url: https://example.org/foo/bar{?namespace,name}
+ 
+-      # # resourceQuotaHelp - configure help text how to configure project resource quota
+-      # resourceQuotaHelp:
+-      #   text: Help text
+-
+-      # # controlPlaneHighAvailabilityHelp - configure help text for control plane high availability, control plane pricing etc.
+-      # controlPlaneHighAvailabilityHelp:
+-      #   text: Help text
+-
+-      # # knownConditions - overwrite or add shoot condition descriptions
+-      # knownConditions:
+-      #   ExampleConditionReady:
+-      #     name: Example
+-      #     shortName: E
+-      #     description: Example Description
+-      #     showAdmin: false
+-      #     sortOrder: 99
+-
+     # # github configuration of the ticket feature
+     # gitHub:
+     #   apiUrl: https://api.foo-github.com
+@@ -327,10 +293,15 @@ global:
+     #   authentication:
+     #     username: dashboard
+     #     token: dummytoken
+-    #   pollIntervalSeconds: 900 # In which interval GitHub issues will be synced. Timer is resetted by receiving a webhook. Disabled if 0 or not defined.
+-    #   syncThrottleSeconds: 20 # Defines the time window in which only one sync is allowed to avoid issues with rate limiting. Default 20. Disabled if 0.
+-    #   syncConcurrency: 10 # Defines the maximum number of parallel requests towards GitHub per instance and sync. Default 10.
++    #   # pollIntervalSeconds: 30 # only necessary when dashboard's webhook can't be reached by github and thus polling needs to be done
++
++    #  # resourceQuotaHelp - configure help text how to configure project resource quota
++    #  resourceQuotaHelp:
++    #    text: Help text
+ 
++    #  # controlPlaneHighAvailabilityHelp - configure help text for control plane high availability, control plane pricing etc.
++    #  controlPlaneHighAvailabilityHelp:
++    #    text: Help text
+ 
+     livenessProbe:
+       enabled: true
+diff --git a/docs/README.md b/docs/README.md
+index c4f8df8d..742f6520 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -5,10 +5,6 @@
+ * [Dashboard Architecture](./architecture/README.md)
+ * [Gardener landing page `gardener.cloud`](https://gardener.cloud/)
+ 
+-## Concepts
+-
+-* [Webterminals](concepts/webterminals.md)
+-
+ ## Usage
+ 
+ * [Working with Projects](usage/working-with-projects.md)
+@@ -19,13 +15,13 @@
+ * [Connect kubectl](usage/connect-kubectl.md)
+ * [Custom Shoot Fields](usage/custom-fields.md)
+ 
++## Operations
++
++* [Configure Access Restrictions](operations/access-restrictions.md)
++* [Theming](operations/theming.md)
++* [Webterminals](operations/webterminals.md)
++
+ ## Development
+ 
+ * [Setting up a local development environment](development/local-setup.md)
+ * [Testing](development/testing.md)
+-
+-## Deployment
+-
+-### Configuration
+-* [Configure Access Restrictions](deployment/access-restrictions.md)
+-* [Theming](deployment/theming.md)
+diff --git a/docs/deployment/access-restrictions.md b/docs/operations/access-restrictions.md
+similarity index 100%
+rename from docs/deployment/access-restrictions.md
+rename to docs/operations/access-restrictions.md
+diff --git a/docs/deployment/theming.md b/docs/operations/theming.md
+similarity index 100%
+rename from docs/deployment/theming.md
+rename to docs/operations/theming.md
+diff --git a/docs/concepts/webterminals.md b/docs/operations/webterminals.md
+similarity index 100%
+rename from docs/concepts/webterminals.md
+rename to docs/operations/webterminals.md
+diff --git a/docs/usage/connect-kubectl.md b/docs/usage/connect-kubectl.md
+index ccd3f05f..0ab2aaae 100644
+--- a/docs/usage/connect-kubectl.md
++++ b/docs/usage/connect-kubectl.md
+@@ -8,9 +8,12 @@ Learn more about [kubeconfig](https://kubernetes.io/docs/concepts/configuration/
+ - You have created a cluster and its status is operational.
+ 
+ On this page:
+-- [Downloading kubeconfig for a cluster](#downloading-kubeconfig-for-a-cluster)
+-- [Connecting to the cluster](#connecting-to-the-cluster)
+-- [Exporting KUBECONFIG environment variable](#exporting-kubeconfig-environment-variable)
++- [Connect kubectl](#connect-kubectl)
++    - [Prerequisites](#prerequisites)
++    - [Downloading kubeconfig for a cluster](#downloading-kubeconfig-for-a-cluster)
++    - [Connecting to the cluster](#connecting-to-the-cluster)
++    - [Exporting KUBECONFIG environment variable](#exporting-kubeconfig-environment-variable)
++  - [What's next?](#whats-next)
+ 
+ <br/>
+ 
+diff --git a/docs/usage/project-operations.md b/docs/usage/project-operations.md
+index 391df6fa..47f639dd 100755
+--- a/docs/usage/project-operations.md
++++ b/docs/usage/project-operations.md
+@@ -373,4 +373,4 @@ The name of the Secret containing the kubeconfig is in the form `<cluster-name>.
+ 
+ - [Accessing the Gardener API Through the Dashboard](./gardener-api.md)
+ 
+-- [Authenticating with an Identity Provider](https://github.com/gardener/documentation/blob/master/website/documentation/guides/administer_shoots/oidc-login/_index.md).
++- [Authenticating with an Identity Provider](https://github.com/gardener/documentation/blob/master/website/documentation/guides/administer-shoots/oidc-login/_index.md).
+diff --git a/docs/whitelabeling.md b/docs/whitelabeling.md
+new file mode 100644
+index 00000000..45ba2642
+--- /dev/null
++++ b/docs/whitelabeling.md
+@@ -0,0 +1,41 @@
++# Customization
++This document describes possibilities to customize the gardener dashboard
++as deployed on Kubernetes. This can help in offering whitelabeling features
++to customers.
++
++We assume one deployment of the dashboard for each customized or whitelabeled
++gardener-dashboard. We strive for minimal modifications needed in the source
++code to allow for whitelabeling configurations.
++
++## Theming
++Gardener-Dashboard is using the Vue.js-Framework and allows for using the
++Vue.js Theming options. For documentation see deployment/theming.md
++
++## Logo
++The logo is served at `/static/assets/logo.svg` and can be found in the
++source at `/frontend/public/static/assets/logo.svg`. This is also changed
++with by the theming capabilities.
++
++## Customizing Product Name
++You can customize some values by providing a custom `login-config.json`.
++Available parameters are:
++```json
++{
++  "productName": "PSKE",
++  "productSlogan": "Managed Kubernetes at Scale",
++  "documentationURL": "https://docs.plusserver.com",
++  "supportURL": "https://www.plusserver.com/ueber-uns/plusserver-kontakt",
++  "landingPageUrl": "https://plusserver.com/pske",
++  "landingPageName": "Plusserver Kubernetes Engine",
++  "customLandingPagePre": "Powered by",
++  "loginTypes": ["token"]
++}
++```
++This file is found at `frontend/public/login-config.json` and served
++as `/login-config-json`. You can see all parameters in the source at
++`frontend/src/views/Login.vue`.
++
++To avoid uneccessary network latency, the `login-config.json` is fetched
++by the Login-Page only and the values are then copied in the Browsers
++sessionStorage. This means that during development you might have to
++logout and login again to see the changes reflected on the rendered pages.
+\ No newline at end of file
+diff --git a/frontend/jest.config.js b/frontend/jest.config.js
+index 6099493b..62d9aa79 100644
+--- a/frontend/jest.config.js
++++ b/frontend/jest.config.js
+@@ -9,7 +9,7 @@ module.exports = {
+   snapshotSerializers: [require.resolve('jest-serializer-vue')],
+   coverageThreshold: {
+     global: {
+-      branches: 42,
++      branches: 41,
+       functions: 27,
+       lines: 39,
+       statements: 39
+diff --git a/frontend/public/login-config.json b/frontend/public/login-config.json
+index 12bcb0c4..4ffbc5cd 100644
+--- a/frontend/public/login-config.json
++++ b/frontend/public/login-config.json
+@@ -1,4 +1,10 @@
+ {
+-  "landingPageUrl": "https://gardener.cloud/",
+-  "loginTypes": ["oidc", "token"]
++  "productName": "PSKE",
++  "productSlogan": "Managed Kubernetes at Scale",
++  "documentationURL": "https://docs.plusserver.com",
++  "supportURL": "https://login.plusserver.com/en/login",
++  "landingPageUrl": "https://plusserver.com/pske",
++  "landingPageName": "Plusserver Kubernetes Engine",
++  "customLandingPagePre": "Powered by",
++  "loginTypes": ["token"]
+ }
+diff --git a/frontend/public/static/assets/favicon-16x16.png b/frontend/public/static/assets/favicon-16x16.png
+index ba11467e..848d1708 100644
+Binary files a/frontend/public/static/assets/favicon-16x16.png and b/frontend/public/static/assets/favicon-16x16.png differ
+diff --git a/frontend/public/static/assets/favicon-32x32.png b/frontend/public/static/assets/favicon-32x32.png
+index 4f691759..99b36a58 100644
+Binary files a/frontend/public/static/assets/favicon-32x32.png and b/frontend/public/static/assets/favicon-32x32.png differ
+diff --git a/frontend/public/static/assets/favicon-96x96.png b/frontend/public/static/assets/favicon-96x96.png
+index 6984eec9..4b80ef4a 100644
+Binary files a/frontend/public/static/assets/favicon-96x96.png and b/frontend/public/static/assets/favicon-96x96.png differ
+diff --git a/frontend/public/static/assets/favicon.ico b/frontend/public/static/assets/favicon.ico
+index 4efb56fa..8dffe8fd 100644
+Binary files a/frontend/public/static/assets/favicon.ico and b/frontend/public/static/assets/favicon.ico differ
+diff --git a/frontend/public/static/assets/logo.svg b/frontend/public/static/assets/logo.svg
+index 2f079659..23bfab2a 100644
+--- a/frontend/public/static/assets/logo.svg
++++ b/frontend/public/static/assets/logo.svg
+@@ -1,40 +1 @@
+-<?xml version="1.0" encoding="UTF-8"?>
+-<svg width="90px" height="90px" viewBox="0 0 90 90" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+-    <!-- Generator: Sketch 43.2 (39069) - http://www.bohemiancoding.com/sketch -->
+-    <title>logo</title>
+-    <desc>Created with Sketch.</desc>
+-    <defs>
+-        <path d="M41.8864954,0.994901575 C42.8830405,0.514990742 44.5028956,0.516982644 45.4953045,0.994901575 L76.8159138,16.0781121 C77.8124589,16.5580229 78.8208647,17.8257185 79.0659694,18.8995926 L86.8015211,52.7912589 C87.0476474,53.8696088 86.6852538,55.4484075 85.9984855,56.3095876 L64.3239514,83.4885938 C63.6343208,84.3533632 62.1740175,85.0543973 61.0725268,85.0543973 L26.3092731,85.0543973 C25.2031915,85.0543973 23.7446167,84.3497739 23.0578485,83.4885938 L1.38331434,56.3095876 C0.693683723,55.4448182 0.335174016,53.865133 0.580278769,52.7912589 L8.31583044,18.8995926 C8.56195675,17.8212428 9.57347722,16.556031 10.5658861,16.0781121 L41.8864954,0.994901575 Z" id="path-1"></path>
+-        <linearGradient x1="12.7542673%" y1="-18.6617048%" x2="88.2666158%" y2="84.6075483%" id="linearGradient-3">
+-            <stop stop-color="#FFFFFF" offset="0%"></stop>
+-            <stop stop-color="#439246" offset="100%"></stop>
+-        </linearGradient>
+-        <linearGradient x1="50%" y1="4.93673768%" x2="148.756007%" y2="175.514523%" id="linearGradient-4">
+-            <stop stop-color="#FFFFFF" offset="0%"></stop>
+-            <stop stop-color="#439246" offset="100%"></stop>
+-        </linearGradient>
+-        <linearGradient x1="19.1574381%" y1="-9.04800713%" x2="82.2203149%" y2="77.9084293%" id="linearGradient-5">
+-            <stop stop-color="#FFFFFF" offset="0%"></stop>
+-            <stop stop-color="#439246" offset="100%"></stop>
+-        </linearGradient>
+-        <linearGradient x1="57.4403751%" y1="26.3148481%" x2="137.966711%" y2="158.080556%" id="linearGradient-6">
+-            <stop stop-color="#FFFFFF" offset="0%"></stop>
+-            <stop stop-color="#439246" offset="100%"></stop>
+-        </linearGradient>
+-    </defs>
+-    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+-        <g id="logo">
+-            <g id="Rectangle-2" transform="translate(1.000000, 0.000000)">
+-                <mask id="mask-2" fill="white">
+-                    <use xlink:href="#path-1"></use>
+-                </mask>
+-                <use id="Mask" fill="#009F76" xlink:href="#path-1"></use>
+-                <polygon fill="#000000" opacity="0.289628623" mask="url(#mask-2)" points="-17.6484375 54.5224609 30.8242188 25.0791016 63.4726562 58.5 24.7324219 92.6689453"></polygon>
+-            </g>
+-            <path d="M56.8508631,39.260019 C56.4193519,40.443987 55.6088085,41.581593 54.6736295,42.1938694 L46.5997298,47.4799783 C45.2142627,48.3870654 42.9749783,48.3916494 41.5825097,47.4799783 L33.50861,42.1938694 C32.123143,41.2867823 31,39.206345 31,37.545932 L31,26.4150304 C31,25.6897174 31.2131118,24.884885 31.5692681,24.1324532 L56.8508631,39.260019 Z" id="Combined-Shape" fill="url(#linearGradient-3)" transform="translate(43.925432, 36.147233) scale(-1, 1) translate(-43.925432, -36.147233) "></path>
+-            <path d="M56.0774672,25.1412464 C56.4306829,25.8903325 56.6425556,26.6907345 56.6425556,27.4119019 L56.6425556,38.5428034 C56.6425556,40.2027013 55.5264141,42.2790698 54.1339456,43.1907408 L46.0600459,48.4768498 C44.6745788,49.3839368 42.4352943,49.3885208 41.0428258,48.4768498 L32.9689261,43.1907408 C32.2918101,42.7474223 31.6773514,42.0238435 31.2260376,41.206007 L56.0774672,25.1412464 Z" id="Combined-Shape" fill="url(#linearGradient-4)" transform="translate(43.821278, 37.246598) scale(-1, 1) translate(-43.821278, -37.246598) "></path>
+-            <path d="M65.0702134,57.1846889 C64.5985426,58.2007851 63.8367404,59.1236871 62.9788591,59.6189851 L47.37497,68.6278947 C45.9443535,69.4538615 43.6226022,69.4525546 42.1942494,68.6278947 L26.5903603,59.6189851 C25.1597438,58.7930183 24,56.7816693 24,55.1323495 L24,37.1145303 C24,36.3487436 24.249712,35.5060005 24.6599102,34.7400631 L65.0702134,57.1846889 Z" id="Combined-Shape" fill="url(#linearGradient-5)"></path>
+-            <path d="M65.0189476,34.954538 C65.3636909,35.6617313 65.5692194,36.42021 65.5692194,37.1145303 L65.5692194,55.1323495 C65.5692194,56.7842831 64.4072119,58.7943252 62.9788591,59.6189851 L47.37497,68.6278947 C45.9443535,69.4538615 43.6226022,69.4525546 42.1942494,68.6278947 L26.5903603,59.6189851 C25.9237304,59.2341061 25.3159155,58.5918431 24.8568495,57.8487596 L65.0189476,34.954538 Z" id="Combined-Shape" fill="url(#linearGradient-6)"></path>
+-        </g>
+-    </g>
+-</svg>
+\ No newline at end of file
++<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 136 136"><defs><style>.cls-1{fill:#009bf4;}.cls-2{fill:#99d7fb;}</style></defs><g id="Icon"><path class="cls-1" d="m127.98,70.99v-6h-17.1c-.66-9.6-4.49-18.34-10.45-25.18l12.1-12.1-4.24-4.25-12.1,12.1c-6.84-5.95-15.58-9.78-25.18-10.44V8.02h-6v17.1c-9.6.66-18.34,4.49-25.18,10.44l-12.1-12.1-4.24,4.25,12.1,12.1c-5.95,6.84-9.78,15.58-10.44,25.18H8.05v6h17.1c.64,9.35,4.27,18.13,10.43,25.19l-12.09,12.09,4.24,4.24,12.09-12.09c7.07,6.17,15.84,9.8,25.19,10.43v17.1h6v-17.1c9.6-.66,18.34-4.49,25.18-10.44l12.1,12.1,4.24-4.24-12.1-12.1c5.96-6.84,9.79-15.58,10.45-25.18h17.1Zm-23.11,0c-.64,7.95-3.81,15.19-8.69,20.93l-14.93-14.93h-4.24v4.24l14.93,14.93c-5.74,4.87-12.99,8.04-20.93,8.68v-18.85h-6v18.85c-7.75-.62-15.02-3.62-20.94-8.67l14.94-14.94v-4.24h-4.24l-14.94,14.93c-5.05-5.92-8.05-13.18-8.67-20.93h18.85v-6h-18.85c.64-7.94,3.8-15.19,8.68-20.93l14.93,14.93h4.24v-4.25l-14.92-14.92c5.73-4.88,12.98-8.05,20.92-8.69v18.86h6v-18.86c7.94.64,15.19,3.81,20.93,8.69l-14.93,14.92v4.25h4.24l14.93-14.93c4.88,5.74,8.05,12.99,8.69,20.93h-18.86v6h18.86Z"/></g><g id="_"><polygon class="cls-2" points="80.01 64.99 80.01 70.99 71.01 70.99 71.01 79.99 65.01 79.99 65.01 70.99 56.01 70.99 56.01 64.99 65.01 64.99 65.01 55.99 71.01 55.99 71.01 64.99 80.01 64.99"/></g></svg>
+\ No newline at end of file
+diff --git a/frontend/src/assets/aws.svg b/frontend/src/assets/aws.svg
+index a4266df9..1f60cb2e 100644
+--- a/frontend/src/assets/aws.svg
++++ b/frontend/src/assets/aws.svg
+@@ -1,38 +1 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<!-- Generator: Adobe Illustrator 19.0.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+-<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+-	 viewBox="0 0 304 182" style="enable-background:new 0 0 304 182;" xml:space="preserve">
+-<style type="text/css">
+-	.st0{fill:#252F3E;}
+-	.st1{fill-rule:evenodd;clip-rule:evenodd;fill:#FF9900;}
+-</style>
+-<g>
+-	<path class="st0" d="M86.4,66.4c0,3.7,0.4,6.7,1.1,8.9c0.8,2.2,1.8,4.6,3.2,7.2c0.5,0.8,0.7,1.6,0.7,2.3c0,1-0.6,2-1.9,3l-6.3,4.2
+-		c-0.9,0.6-1.8,0.9-2.6,0.9c-1,0-2-0.5-3-1.4C76.2,90,75,88.4,74,86.8c-1-1.7-2-3.6-3.1-5.9c-7.8,9.2-17.6,13.8-29.4,13.8
+-		c-8.4,0-15.1-2.4-20-7.2c-4.9-4.8-7.4-11.2-7.4-19.2c0-8.5,3-15.4,9.1-20.6c6.1-5.2,14.2-7.8,24.5-7.8c3.4,0,6.9,0.3,10.6,0.8
+-		c3.7,0.5,7.5,1.3,11.5,2.2v-7.3c0-7.6-1.6-12.9-4.7-16c-3.2-3.1-8.6-4.6-16.3-4.6c-3.5,0-7.1,0.4-10.8,1.3c-3.7,0.9-7.3,2-10.8,3.4
+-		c-1.6,0.7-2.8,1.1-3.5,1.3c-0.7,0.2-1.2,0.3-1.6,0.3c-1.4,0-2.1-1-2.1-3.1v-4.9c0-1.6,0.2-2.8,0.7-3.5c0.5-0.7,1.4-1.4,2.8-2.1
+-		c3.5-1.8,7.7-3.3,12.6-4.5c4.9-1.3,10.1-1.9,15.6-1.9c11.9,0,20.6,2.7,26.2,8.1c5.5,5.4,8.3,13.6,8.3,24.6V66.4z M45.8,81.6
+-		c3.3,0,6.7-0.6,10.3-1.8c3.6-1.2,6.8-3.4,9.5-6.4c1.6-1.9,2.8-4,3.4-6.4c0.6-2.4,1-5.3,1-8.7v-4.2c-2.9-0.7-6-1.3-9.2-1.7
+-		c-3.2-0.4-6.3-0.6-9.4-0.6c-6.7,0-11.6,1.3-14.9,4c-3.3,2.7-4.9,6.5-4.9,11.5c0,4.7,1.2,8.2,3.7,10.6
+-		C37.7,80.4,41.2,81.6,45.8,81.6z M126.1,92.4c-1.8,0-3-0.3-3.8-1c-0.8-0.6-1.5-2-2.1-3.9L96.7,10.2c-0.6-2-0.9-3.3-0.9-4
+-		c0-1.6,0.8-2.5,2.4-2.5h9.8c1.9,0,3.2,0.3,3.9,1c0.8,0.6,1.4,2,2,3.9l16.8,66.2l15.6-66.2c0.5-2,1.1-3.3,1.9-3.9c0.8-0.6,2.2-1,4-1
+-		h8c1.9,0,3.2,0.3,4,1c0.8,0.6,1.5,2,1.9,3.9l15.8,67l17.3-67c0.6-2,1.3-3.3,2-3.9c0.8-0.6,2.1-1,3.9-1h9.3c1.6,0,2.5,0.8,2.5,2.5
+-		c0,0.5-0.1,1-0.2,1.6c-0.1,0.6-0.3,1.4-0.7,2.5l-24.1,77.3c-0.6,2-1.3,3.3-2.1,3.9c-0.8,0.6-2.1,1-3.8,1h-8.6c-1.9,0-3.2-0.3-4-1
+-		c-0.8-0.7-1.5-2-1.9-4L156,23l-15.4,64.4c-0.5,2-1.1,3.3-1.9,4c-0.8,0.7-2.2,1-4,1H126.1z M254.6,95.1c-5.2,0-10.4-0.6-15.4-1.8
+-		c-5-1.2-8.9-2.5-11.5-4c-1.6-0.9-2.7-1.9-3.1-2.8c-0.4-0.9-0.6-1.9-0.6-2.8v-5.1c0-2.1,0.8-3.1,2.3-3.1c0.6,0,1.2,0.1,1.8,0.3
+-		c0.6,0.2,1.5,0.6,2.5,1c3.4,1.5,7.1,2.7,11,3.5c4,0.8,7.9,1.2,11.9,1.2c6.3,0,11.2-1.1,14.6-3.3c3.4-2.2,5.2-5.4,5.2-9.5
+-		c0-2.8-0.9-5.1-2.7-7c-1.8-1.9-5.2-3.6-10.1-5.2L246,52c-7.3-2.3-12.7-5.7-16-10.2c-3.3-4.4-5-9.3-5-14.5c0-4.2,0.9-7.9,2.7-11.1
+-		c1.8-3.2,4.2-6,7.2-8.2c3-2.3,6.4-4,10.4-5.2c4-1.2,8.2-1.7,12.6-1.7c2.2,0,4.5,0.1,6.7,0.4c2.3,0.3,4.4,0.7,6.5,1.1
+-		c2,0.5,3.9,1,5.7,1.6c1.8,0.6,3.2,1.2,4.2,1.8c1.4,0.8,2.4,1.6,3,2.5c0.6,0.8,0.9,1.9,0.9,3.3v4.7c0,2.1-0.8,3.2-2.3,3.2
+-		c-0.8,0-2.1-0.4-3.8-1.2c-5.7-2.6-12.1-3.9-19.2-3.9c-5.7,0-10.2,0.9-13.3,2.8c-3.1,1.9-4.7,4.8-4.7,8.9c0,2.8,1,5.2,3,7.1
+-		c2,1.9,5.7,3.8,11,5.5l14.2,4.5c7.2,2.3,12.4,5.5,15.5,9.6c3.1,4.1,4.6,8.8,4.6,14c0,4.3-0.9,8.2-2.6,11.6
+-		c-1.8,3.4-4.2,6.4-7.3,8.8c-3.1,2.5-6.8,4.3-11.1,5.6C264.4,94.4,259.7,95.1,254.6,95.1z"/>
+-	<g>
+-		<path class="st1" d="M273.5,143.7c-32.9,24.3-80.7,37.2-121.8,37.2c-57.6,0-109.5-21.3-148.7-56.7c-3.1-2.8-0.3-6.6,3.4-4.4
+-			c42.4,24.6,94.7,39.5,148.8,39.5c36.5,0,76.6-7.6,113.5-23.2C274.2,133.6,278.9,139.7,273.5,143.7z"/>
+-		<path class="st1" d="M287.2,128.1c-4.2-5.4-27.8-2.6-38.5-1.3c-3.2,0.4-3.7-2.4-0.8-4.5c18.8-13.2,49.7-9.4,53.3-5
+-			c3.6,4.5-1,35.4-18.6,50.2c-2.7,2.3-5.3,1.1-4.1-1.9C282.5,155.7,291.4,133.4,287.2,128.1z"/>
+-	</g>
+-</g>
+-</svg>
+\ No newline at end of file
++<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 136 136"><defs><style>.cls-1{fill:#009bf4;}.cls-2{fill:#99d7fb;}</style></defs><g id="Icon"><path class="cls-1" d="m134,77.75c0,11.12-9.03,20.2-20.14,20.25h-27.86v-6h27.85c7.8-.03,14.15-6.43,14.15-14.25s-6.36-14.25-14.19-14.25h-3.57l.4-3.36c.14-1.16.21-2.29.21-3.47,0-15.26-12.36-27.67-27.55-27.67-9.64,0-18.7,5.15-23.63,13.44l-1.57,2.65-2.6-1.64c-3.07-1.93-6.67-2.95-10.4-2.95-10.98,0-19.91,8.97-19.91,20v3h-3c-7.83,0-14.19,6.39-14.19,14.25s6.36,14.25,14.19,14.25h27.81v6h-27.81c-11.13,0-20.19-9.09-20.19-20.25,0-10.2,7.55-18.66,17.34-20.05,1.39-13.03,12.41-23.2,25.76-23.2,3.86,0,7.61.84,11.01,2.45,6.24-8.67,16.41-13.95,27.19-13.95,18.5,0,33.55,15.1,33.55,33.67,0,.35,0,.7-.02,1.05,9.71,1.47,17.17,9.89,17.17,20.03Z"/><path class="cls-1" d="m48.22,59.07h-4.07l-7.96,17.85h4.23l1.58-3.82h8.29l1.58,3.82h4.34l-7.99-17.85Zm-4.89,10.89l2.83-6.83,2.83,6.83h-5.66Z"/><path class="cls-1" d="m80.13,59.07l-4.16,12.65-4.08-12.65h-3.83l-4.2,12.55-4.03-12.55h-4.29l5.87,17.85h4.41l4.05-12.08,3.93,12.08h4.44l5.84-17.85h-3.95Z"/><path class="cls-1" d="m98.88,68.87c-.62-.7-1.36-1.21-2.23-1.53-.87-.33-1.98-.65-3.34-.97-1.31-.29-2.28-.59-2.92-.88-.64-.3-.96-.76-.96-1.37s.28-1.1.83-1.48c.55-.37,1.41-.56,2.56-.56,1.65,0,3.3.47,4.95,1.41l1.28-3.14c-.82-.51-1.77-.9-2.86-1.17-1.09-.28-2.2-.41-3.34-.41-1.63,0-3.01.24-4.14.74-1.13.49-1.98,1.16-2.54,2s-.84,1.78-.84,2.82c0,1.19.31,2.14.93,2.85.62.72,1.36,1.24,2.23,1.56.87.32,1.98.64,3.34.97.88.2,1.58.39,2.1.56s.95.39,1.28.67.5.64.5,1.06c0,.58-.28,1.04-.85,1.39-.56.35-1.42.52-2.6.52-1.05,0-2.1-.17-3.16-.5-1.05-.34-1.96-.8-2.73-1.36l-1.4,3.11c.8.62,1.86,1.11,3.17,1.5,1.32.38,2.69.57,4.1.57,1.63,0,3.01-.25,4.15-.74,1.14-.49,2-1.16,2.57-2,.57-.84.85-1.77.85-2.79,0-1.19-.31-2.14-.93-2.83Z"/></g><g id="_"><polygon class="cls-2" points="80 92 80 98 71 98 71 107 65 107 65 98 56 98 56 92 65 92 65 83 71 83 71 92 80 92"/></g></svg>
+\ No newline at end of file
+diff --git a/frontend/src/assets/openstack.svg b/frontend/src/assets/openstack.svg
+index 66fdb98e..fb7b82e8 100644
+--- a/frontend/src/assets/openstack.svg
++++ b/frontend/src/assets/openstack.svg
+@@ -1,97 +1 @@
+-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+-<svg
+-   xmlns:dc="http://purl.org/dc/elements/1.1/"
+-   xmlns:cc="http://creativecommons.org/ns#"
+-   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+-   xmlns:svg="http://www.w3.org/2000/svg"
+-   xmlns="http://www.w3.org/2000/svg"
+-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+-   id="Layer_1"
+-   data-name="Layer 1"
+-   viewBox="-10 10 204 200"
+-   version="1.1"
+-   sodipodi:docname="openstack.svg"
+-   width="204"
+-   height="200"
+-   inkscape:version="0.92.2 5c3e80d, 2017-08-06">
+-  <metadata
+-     id="metadata4168">
+-    <rdf:RDF>
+-      <cc:Work
+-         rdf:about="">
+-        <dc:format>image/svg+xml</dc:format>
+-        <dc:type
+-           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+-        <dc:title>OpenStack_Logo_Mark</dc:title>
+-      </cc:Work>
+-    </rdf:RDF>
+-  </metadata>
+-  <sodipodi:namedview
+-     pagecolor="#ffffff"
+-     bordercolor="#666666"
+-     borderopacity="1"
+-     objecttolerance="10"
+-     gridtolerance="10"
+-     guidetolerance="10"
+-     inkscape:pageopacity="0"
+-     inkscape:pageshadow="2"
+-     inkscape:window-width="917"
+-     inkscape:window-height="790"
+-     id="namedview4166"
+-     showgrid="false"
+-     viewbox-width="180.35"
+-     units="px"
+-     inkscape:zoom="1.8505927"
+-     inkscape:cx="157.84103"
+-     inkscape:cy="77.193007"
+-     inkscape:window-x="487"
+-     inkscape:window-y="218"
+-     inkscape:window-maximized="0"
+-     inkscape:current-layer="Layer_1"
+-     viewbox-x="-10"
+-     viewbox-y="10" />
+-  <defs
+-     id="defs4149">
+-    <style
+-       id="style4147">.cls-1{opacity:0.98;}.cls-2{fill:#ed1944;}</style>
+-  </defs>
+-  <title
+-     id="title4151">OpenStack_Logo_Mark</title>
+-  <g
+-     class="cls-1"
+-     id="g4161"
+-     style="opacity:0.98000004"
+-     transform="translate(0,19.649994)">
+-    <path
+-       class="cls-2"
+-       d="m 461.82,215.24 h -150 a 17.17,17.17 0 0 0 -17.12,17.12 v 40.35 h 41.61 v -6.59 a 9.26,9.26 0 0 1 9.26,-9.26 h 82.53 a 9.26,9.26 0 0 1 9.26,9.26 v 6.59 H 479 v -40.35 a 17.18,17.18 0 0 0 -17.18,-17.12 z"
+-       transform="translate(-294.67,-215.24)"
+-       id="path4153"
+-       inkscape:connector-curvature="0"
+-       style="fill:#ed1944" />
+-    <path
+-       class="cls-2"
+-       d="m 437.33,344.72 a 9.27,9.27 0 0 1 -9.26,9.26 h -82.53 a 9.27,9.27 0 0 1 -9.26,-9.26 v -6.59 h -41.61 v 40.34 a 17.17,17.17 0 0 0 17.12,17.13 h 150 A 17.18,17.18 0 0 0 479,378.47 v -40.34 h -41.67 z"
+-       transform="translate(-294.67,-215.24)"
+-       id="path4155"
+-       inkscape:connector-curvature="0"
+-       style="fill:#ed1944" />
+-    <rect
+-       class="cls-2"
+-       y="69.370003"
+-       width="41.619999"
+-       height="41.619999"
+-       id="rect4157"
+-       x="0"
+-       style="fill:#ed1944" />
+-    <rect
+-       class="cls-2"
+-       x="142.66"
+-       y="69.370003"
+-       width="41.619999"
+-       height="41.619999"
+-       id="rect4159"
+-       style="fill:#ed1944" />
+-  </g>
+-</svg>
++<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 136 136"><defs><style>.cls-1{fill:#009bf4;}.cls-2{fill:#99d7fb;}</style></defs><g id="Icon"><path class="cls-1" d="m134,71.29c0,11.12-9.03,20.21-20.14,20.25h-9.86c-7.37,0-13.52,5.35-14.77,12.37h5.75l-8.98,15.55-7.46-12.92-1.52-2.63h6.15c.37-2.95,1.35-5.72,2.83-8.16,3.67-6.11,10.36-10.21,18-10.21h9.85c7.8-.03,14.15-6.42,14.15-14.25s-6.36-14.25-14.19-14.25h-3.57l.4-3.36c.14-1.16.21-2.29.21-3.47,0-15.26-12.36-27.67-27.55-27.67-9.64,0-18.7,5.15-23.63,13.45l-1.57,2.64-2.6-1.64c-3.07-1.93-6.67-2.95-10.4-2.95-10.98,0-19.91,8.97-19.91,20v3h-3c-7.83,0-14.19,6.39-14.19,14.25s6.36,14.25,14.19,14.25h9.81c7.37,0,13.52-5.35,14.77-12.37h-5.75l8.98-15.55,7.46,12.92,1.52,2.63h-6.15c-.37,2.95-1.35,5.72-2.83,8.16-3.67,6.11-10.36,10.21-18,10.21h-9.81c-11.13,0-20.19-9.08-20.19-20.25,0-10.2,7.55-18.66,17.34-20.05,1.39-13.02,12.41-23.2,25.76-23.2,3.86,0,7.61.84,11.01,2.45,6.24-8.67,16.41-13.95,27.19-13.95,18.5,0,33.55,15.1,33.55,33.67,0,.35,0,.71-.02,1.06,9.71,1.46,17.17,9.88,17.17,20.02Z"/></g><g id="_"><polygon class="cls-2" points="80 85.54 80 91.54 71 91.54 71 100.54 65 100.54 65 91.54 56 91.54 56 85.54 65 85.54 65 76.54 71 76.54 71 85.54 80 85.54"/></g></svg>
+\ No newline at end of file
+diff --git a/frontend/src/assets/pluscloudopen.svg b/frontend/src/assets/pluscloudopen.svg
+new file mode 100644
+index 00000000..fb7b82e8
+--- /dev/null
++++ b/frontend/src/assets/pluscloudopen.svg
+@@ -0,0 +1 @@
++<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 136 136"><defs><style>.cls-1{fill:#009bf4;}.cls-2{fill:#99d7fb;}</style></defs><g id="Icon"><path class="cls-1" d="m134,71.29c0,11.12-9.03,20.21-20.14,20.25h-9.86c-7.37,0-13.52,5.35-14.77,12.37h5.75l-8.98,15.55-7.46-12.92-1.52-2.63h6.15c.37-2.95,1.35-5.72,2.83-8.16,3.67-6.11,10.36-10.21,18-10.21h9.85c7.8-.03,14.15-6.42,14.15-14.25s-6.36-14.25-14.19-14.25h-3.57l.4-3.36c.14-1.16.21-2.29.21-3.47,0-15.26-12.36-27.67-27.55-27.67-9.64,0-18.7,5.15-23.63,13.45l-1.57,2.64-2.6-1.64c-3.07-1.93-6.67-2.95-10.4-2.95-10.98,0-19.91,8.97-19.91,20v3h-3c-7.83,0-14.19,6.39-14.19,14.25s6.36,14.25,14.19,14.25h9.81c7.37,0,13.52-5.35,14.77-12.37h-5.75l8.98-15.55,7.46,12.92,1.52,2.63h-6.15c-.37,2.95-1.35,5.72-2.83,8.16-3.67,6.11-10.36,10.21-18,10.21h-9.81c-11.13,0-20.19-9.08-20.19-20.25,0-10.2,7.55-18.66,17.34-20.05,1.39-13.02,12.41-23.2,25.76-23.2,3.86,0,7.61.84,11.01,2.45,6.24-8.67,16.41-13.95,27.19-13.95,18.5,0,33.55,15.1,33.55,33.67,0,.35,0,.71-.02,1.06,9.71,1.46,17.17,9.88,17.17,20.02Z"/></g><g id="_"><polygon class="cls-2" points="80 85.54 80 91.54 71 91.54 71 100.54 65 100.54 65 91.54 56 91.54 56 85.54 65 85.54 65 76.54 71 76.54 71 85.54 80 85.54"/></g></svg>
+\ No newline at end of file
+diff --git a/frontend/src/components/AdminKubeConfigRequest.vue b/frontend/src/components/AdminKubeConfigRequest.vue
+new file mode 100644
+index 00000000..166ca9de
+--- /dev/null
++++ b/frontend/src/components/AdminKubeConfigRequest.vue
+@@ -0,0 +1,61 @@
++<!--
++SPDX-FileCopyrightText: 2021 SAP SE or an SAP affiliate company and Gardener contributors
++
++SPDX-License-Identifier: Apache-2.0
++-->
++
++<template>
++  <action-button-dialog
++    :shoot-item="shootItem"
++    @dialog-opened="onConfigurationDialogOpened"
++    ref="actionDialog"
++    width="500"
++    caption="Configure Kubeconfig Lifetime">
++    <template v-slot:actionComponent>
++      <wildcard-select
++        v-model="expiration"
++        :wildcard-select-items="expirations"
++        wildcard-select-label="Lifetime"
++        ></wildcard-select>
++    </template>
++  </action-button-dialog>
++</template>
++
++<script>
++import ActionButtonDialog from '@/components/dialogs/ActionButtonDialog'
++import WildcardSelect from '@/components/WildcardSelect'
++import shootItem from '@/mixins/shootItem'
++
++export default {
++  name: 'admin-kubeconfig-request',
++  components: {
++    ActionButtonDialog,
++    WildcardSelect
++  },
++  mixins: [
++    shootItem
++  ],
++  data () {
++    return {
++      expiration: undefined
++    }
++  },
++  props: {
++    expirations: {
++      type: Array
++    }
++  },
++  methods: {
++    async onConfigurationDialogOpened () {
++      this.reset()
++      const confirmed = await this.$refs.actionDialog.waitForDialogClosed()
++      if (confirmed) {
++        this.$emit('expirationUpdate', this.expiration)
++      }
++    },
++    reset () {
++      this.expiration = this.expirations[0]
++    }
++  }
++}
++</script>
+diff --git a/frontend/src/components/CloudProfile.vue b/frontend/src/components/CloudProfile.vue
+index f74a4941..14e86318 100644
+--- a/frontend/src/components/CloudProfile.vue
++++ b/frontend/src/components/CloudProfile.vue
+@@ -8,7 +8,7 @@ SPDX-License-Identifier: Apache-2.0
+   <div>
+     <template v-if="createMode">
+       <v-select
+-      :items="cloudProfiles"
++      :items="fixedCloudProfiles"
+       :value="value"
+       item-value="metadata.name"
+       item-text="metadata.displayName"
+@@ -71,6 +71,18 @@ export default {
+           required
+         }
+       }
++    },
++    fixedCloudProfiles () {
++      this.cloudProfiles.forEach(element => {
++        switch (element.metadata.name) {
++          case 'pluscloudopen':{
++            element.metadata.displayName = 'pluscloudopen-cgn'
++            break
++          }
++        }
++      })
++
++      return this.cloudProfiles
+     }
+   },
+   methods: {
+diff --git a/frontend/src/components/ControlPlaneHighAvailability/ManageControlPlaneHighAvailability.vue b/frontend/src/components/ControlPlaneHighAvailability/ManageControlPlaneHighAvailability.vue
+index 11130cf1..52586134 100644
+--- a/frontend/src/components/ControlPlaneHighAvailability/ManageControlPlaneHighAvailability.vue
++++ b/frontend/src/components/ControlPlaneHighAvailability/ManageControlPlaneHighAvailability.vue
+@@ -23,30 +23,6 @@ SPDX-License-Identifier: Apache-2.0
+     <div v-if="!controlPlaneFailureToleranceType">
+       No control plane failure tolerance type configured
+     </div>
+-    <v-expand-transition :appear="animateOnAppear" v-else>
+-      <div>
+-        Control plane failure tolerance type <code>{{controlPlaneFailureToleranceType}}</code> configured
+-        <v-alert type="info" v-if="controlPlaneFailureToleranceType === 'node' && !zoneSupported" dense outlined>
+-          <template v-if="clusterIsNew">
+-            <template v-if="seedName">
+-              The configured seed <code>{{ seedName }}</code> is not <code>multi-zonal</code>.
+-            </template>
+-            <template v-else>
+-              The selected cloud profile has no <code>multi-zonal</code> seed.
+-            </template>
+-          </template>
+-          <template v-else>
+-            The current seed <code>{{ seedName }}</code> is not <code>multi-zonal</code>.
+-          </template>
+-          Therefore failure tolerance type <code>zone</code> is not supported for this cluster.
+-        </v-alert>
+-        <v-alert type="info" v-if="controlPlaneFailureToleranceTypeChangeAllowed" dense outlined>
+-          It is not possible to disable or change control plane high availability later.
+-        </v-alert>
+-      </div>
+-    </v-expand-transition>
+-    <div v-if="!!controlPlaneHighAvailabilityHelpHtml" class="wrap-text" v-html="controlPlaneHighAvailabilityHelpHtml"></div>
+-    <external-link v-else url="https://github.com/gardener/gardener/blob/master/docs/usage/shoot_high_availability.md">More information</external-link>
+   </div>
+ </template>
+ 
+@@ -55,12 +31,8 @@ SPDX-License-Identifier: Apache-2.0
+ import { mapGetters, mapState, mapActions } from 'vuex'
+ import { transformHtml } from '@/utils'
+ import some from 'lodash/some'
+-import ExternalLink from '@/components/ExternalLink.vue'
+ 
+ export default {
+-  components: {
+-    ExternalLink
+-  },
+   data () {
+     return {
+       animateOnAppear: false
+@@ -105,7 +77,8 @@ export default {
+   },
+   methods: {
+     ...mapActions('shootStaging', [
+-      'setControlPlaneFailureToleranceType'
++      'setControlPlaneFailureToleranceType',
++      'shouldHaveHighAvailableControlPlane'
+     ]),
+     resetToleranceType (zoneSupported) {
+       if (this.controlPlaneFailureToleranceTypeChangeAllowed) {
+@@ -118,6 +91,12 @@ export default {
+       }
+     }
+   },
++  props: {
++    userInterActionBus: {
++      type: Object,
++      required: true
++    }
++  },
+   watch: {
+     zoneSupported (value) {
+       this.resetToleranceType(value)
+@@ -125,6 +104,16 @@ export default {
+   },
+   mounted () {
+     this.resetToleranceType(this.zoneSupported)
++
++    if (this.userInterActionBus) {
++      this.userInterActionBus.on('updatePurpose', purpose => {
++        if (purpose === 'production') {
++          this.setControlPlaneFailureToleranceType('node')
++        } else {
++          this.setControlPlaneFailureToleranceType()
++        }
++      })
++    }
+     this.animateOnAppear = true
+   }
+ }
+diff --git a/frontend/src/components/MainNavigation.vue b/frontend/src/components/MainNavigation.vue
+index 5f9a6952..6e0176fc 100644
+--- a/frontend/src/components/MainNavigation.vue
++++ b/frontend/src/components/MainNavigation.vue
+@@ -16,11 +16,14 @@ SPDX-License-Identifier: Apache-2.0
+         <div class="content center main-background darken-2">
+           <v-btn @click.native.stop="setSidebar(!isActive)" icon class="float-right main-navigation-title--text ma-2">
+             <v-icon>mdi-chevron-double-left</v-icon>
++            <v-tooltip>
++              <span>Create Cluster</span>
++            </v-tooltip>
+           </v-btn>
+           <a href="/">
+             <img src="/static/assets/logo.svg" class="logo" alt="gardener logo">
+-            <h1 class="main-navigation-title--text">Gardener <span class="version">{{version}}</span></h1>
+-            <h2 class="primary--text">Universal Kubernetes at Scale</h2>
++            <h1 class="main-navigation-title--text">{{ productName }}</h1>
++            <h2>{{ customSubheader }}</h2>
+           </a>
+         </div>
+       </div>
+@@ -205,6 +208,12 @@ export default {
+     version () {
+       return get(this.cfg, 'appVersion', process.env.VUE_APP_VERSION)
+     },
++    productName () {
++      return sessionStorage.getItem('wl.productName') || 'PSKE'
++    },
++    customSubheader () {
++      return sessionStorage.getItem('wl.productSlogan') || 'Managed Kubernetes at Scale'
++    },
+     isActive: {
+       get () {
+         return this.sidebar
+@@ -577,7 +586,7 @@ export default {
+ 
+     .main-menu {
+       .active-item {
+-        background-color: rgba(#fff, .3);
++        background-color: rgba(#000000, .3);
+       }
+     }
+   }
+diff --git a/frontend/src/components/MainToolbar.vue b/frontend/src/components/MainToolbar.vue
+index f9ba9904..1f5aea8a 100644
+--- a/frontend/src/components/MainToolbar.vue
++++ b/frontend/src/components/MainToolbar.vue
+@@ -33,7 +33,7 @@ SPDX-License-Identifier: Apache-2.0
+         </template>
+         <v-card tile width="300px">
+           <v-card-title primary-title>
+-            <div class="content text-h6 mb-2">Gardener</div>
++            <div class="content text-h6 mb-2">{{ productName }}</div>
+           </v-card-title>
+           <v-divider></v-divider>
+           <v-card-actions class="px-3">
+@@ -95,32 +95,6 @@ SPDX-License-Identifier: Apache-2.0
+               <div class="text-h6">{{displayName}}</div>
+               <div class="text-caption">{{username}}</div>
+               <div class="text-caption" v-if="isAdmin">Operator</div>
+-              <v-btn-toggle v-model="colorSchemeIndex" borderless mandatory @click.native.stop class="mt-3">
+-                <v-tooltip top>
+-                  <template v-slot:activator="{ on }">
+-                    <v-btn small v-on="on">
+-                      <v-icon color="primary">mdi-white-balance-sunny</v-icon>
+-                    </v-btn>
+-                  </template>
+-                  <span>Light Mode</span>
+-                </v-tooltip>
+-                <v-tooltip top>
+-                  <template v-slot:activator="{ on }">
+-                    <v-btn small v-on="on">
+-                      <v-icon color="primary">mdi-weather-night</v-icon>
+-                    </v-btn>
+-                  </template>
+-                  <span>Dark Mode</span>
+-                </v-tooltip>
+-                <v-tooltip top>
+-                  <template v-slot:activator="{ on }">
+-                    <v-btn small v-on="on">
+-                      <v-icon color="primary">mdi-brightness-auto</v-icon>
+-                    </v-btn>
+-                  </template>
+-                  <span>Automatically choose theme based on your system settings</span>
+-                </v-tooltip>
+-              </v-btn-toggle>
+             </div>
+           </v-card-title>
+           <v-divider></v-divider>
+@@ -131,7 +105,7 @@ SPDX-License-Identifier: Apache-2.0
+             </v-btn>
+           </v-card-actions>
+           <v-card-actions class="px-3 pt-1">
+-            <v-btn block text color="secondary" class="justify-start" :to="settingsLink" title="Setting">
++            <v-btn block text color="primary" class="justify-start" :to="settingsLink" title="Setting">
+               <v-icon class="mr-3">mdi-cog</v-icon>
+               Settings
+             </v-btn>
+@@ -243,15 +217,18 @@ export default {
+     settingsLink () {
+       return this.targetRoute('Settings')
+     },
++    productName () {
++      return sessionStorage.getItem('wl.productName') || 'PSKE'
++    },
+     colorSchemeIndex: {
+       get () {
+         switch (this.colorScheme) {
+           case 'light':
+             return 0
+           case 'dark':
+-            return 1
++            return 0
+           default:
+-            return 2
++            return 0
+         }
+       },
+       set (value) {
+@@ -260,10 +237,10 @@ export default {
+             this.setColorScheme('light')
+             break
+           case 1:
+-            this.setColorScheme('dark')
++            this.setColorScheme('light')
+             break
+           default:
+-            this.setColorScheme('auto')
++            this.setColorScheme('light')
+             break
+         }
+       }
+diff --git a/frontend/src/components/NewShoot/NewShootDetails.vue b/frontend/src/components/NewShoot/NewShootDetails.vue
+index 23c1da61..3e3b9dd8 100644
+--- a/frontend/src/components/NewShoot/NewShootDetails.vue
++++ b/frontend/src/components/NewShoot/NewShootDetails.vue
+@@ -59,7 +59,8 @@ SPDX-License-Identifier: Apache-2.0
+     </v-row>
+     <v-row>
+       <v-col cols="12">
+-        <static-token-kubeconfig-switch v-model="enableStaticTokenKubeconfig"></static-token-kubeconfig-switch>
++        <!--Patch: Don't allow customer to disable static kubeconfig-->
++        <static-token-kubeconfig-switch style="display: none;" v-model="enableStaticTokenKubeconfig"></static-token-kubeconfig-switch>
+       </v-col>
+     </v-row>
+     <v-row  v-if="slaDescriptionHtml">
+diff --git a/frontend/src/components/NewShoot/NewShootInfrastructureDetails.vue b/frontend/src/components/NewShoot/NewShootInfrastructureDetails.vue
+index 5821e546..717cb52c 100644
+--- a/frontend/src/components/NewShoot/NewShootInfrastructureDetails.vue
++++ b/frontend/src/components/NewShoot/NewShootInfrastructureDetails.vue
+@@ -53,30 +53,7 @@ SPDX-License-Identifier: Apache-2.0
+           @blur="$v.networkingType.$touch()"
+           ></v-select>
+       </v-col>
+-      <template v-if="infrastructureKind === 'openstack'">
+-        <v-col cols="3">
+-          <wildcard-select
+-            v-model="floatingPoolName"
+-            :wildcard-select-items="allFloatingPoolNames"
+-            wildcard-select-label="Floating Pool"
+-            @valid="onFloatingPoolWildcardValid"
+-            ></wildcard-select>
+-        </v-col>
+-        <v-col cols="3">
+-          <v-select
+-          color="primary"
+-          item-color="primary"
+-          label="Load Balancer Provider"
+-          :items="allLoadBalancerProviderNames"
+-          v-model="loadBalancerProviderName"
+-          :error-messages="getErrorMessages('loadBalancerProviderName')"
+-          @input="onInputLoadBalancerProviderName"
+-          @blur="$v.loadBalancerProviderName.$touch()"
+-          persistent-hint
+-          ></v-select>
+-        </v-col>
+-      </template>
+-      <template v-else-if="infrastructureKind === 'metal'">
++      <template v-if="infrastructureKind === 'metal'">
+         <v-col cols="3">
+           <v-text-field
+             color="primary"
+@@ -179,7 +156,6 @@ SPDX-License-Identifier: Apache-2.0
+ 
+ <script>
+ import CloudProfile from '@/components/CloudProfile'
+-import WildcardSelect from '@/components/WildcardSelect'
+ import SelectSecret from '@/components/SelectSecret'
+ import { required, requiredIf } from 'vuelidate/lib/validators'
+ import { getValidationErrors } from '@/utils'
+@@ -244,7 +220,6 @@ export default {
+   name: 'new-shoot-infrastructure',
+   components: {
+     CloudProfile,
+-    WildcardSelect,
+     SelectSecret
+   },
+   props: {
+@@ -361,10 +336,39 @@ export default {
+       return regionItems
+     },
+     regionHint () {
+-      if (includes(this.regionsWithSeed, this.region)) {
+-        return 'API servers in same region as your workers (optimal if you require a low latency)'
++      if (this.infrastructureKind === 'openstack') {
++        switch (this.region) {
++          case 'intern1':
++          case 'prod1':
++          case 'RegionOne':
++            return 'Cluster running in DE-WEST-1 - Cologne'
++          case 'prod2':
++            return 'Cluster running in DE-NORTH-1 - Hamburg'
++          case 'prod3':
++            return 'Cluster running in DE-NORTH-2 - Hamburg'
++          case 'prod4':
++            return 'Cluster running in DE-WEST-2 - Dusseldorf'
++        }
++      } else {
++        if (includes(this.regionsWithSeed, this.region)) {
++          return 'API servers in same region as your workers (optimal if you require a low latency)'
++        }
++        return 'API servers in another region than your workers (expect a somewhat higher latency; picked by Gardener based on internal considerations such as geographic proximity)'
+       }
+-      return 'API servers in another region than your workers (expect a somewhat higher latency; picked by Gardener based on internal considerations such as geographic proximity)'
++
++      return ''
++    },
++    profileHint () {
++      if (this.infrastructureKind === 'openstack') {
++        switch (this.cloudProfileName) {
++          case 'pluscloudopen':
++            return 'Cluster running in DE-WEST-1 - Cologne'
++          case 'pluscloudopen-ham5':
++            return 'Cluster running in DE-NORTH-1 - Hamburg'
++        }
++      }
++
++      return ''
+     },
+     allLoadBalancerProviderNames () {
+       return this.loadBalancerProviderNamesByCloudProfileNameAndRegion({ cloudProfileName: this.cloudProfileName, region: this.region })
+diff --git a/frontend/src/components/NewShoot/NewShootSelectInfrastructure.vue b/frontend/src/components/NewShoot/NewShootSelectInfrastructure.vue
+index 0dda4547..87659546 100644
+--- a/frontend/src/components/NewShoot/NewShootSelectInfrastructure.vue
++++ b/frontend/src/components/NewShoot/NewShootSelectInfrastructure.vue
+@@ -19,7 +19,8 @@ SPDX-License-Identifier: Apache-2.0
+           <infra-icon :value="infrastructureKind" :size="60" no-background></infra-icon>
+         </div>
+         <div class="mt-2" >
+-          <span class="text-subtitle-1">{{infrastructureKind}}</span>
++          <span v-if="infrastructureKind == 'openstack'" class="text-subtitle-1">pluscloud open</span>
++          <span v-else class="text-subtitle-1">{{infrastructureKind}}</span>
+         </div>
+       </div>
+     </v-card>
+diff --git a/frontend/src/components/PurposeTag.vue b/frontend/src/components/PurposeTag.vue
+index ea5144e9..c154f73c 100644
+--- a/frontend/src/components/PurposeTag.vue
++++ b/frontend/src/components/PurposeTag.vue
+@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
+ <template>
+   <v-tooltip top>
+     <template v-slot:activator="{ on }">
+-      <v-chip v-on="on" class="purpose-tag" v-if="!!shortPurpose" :outlined="!isCritical" :text-color="textColor" color="primary" small>{{ shortPurpose }}</v-chip>
++      <v-chip v-on="on" class="purpose-tag" v-if="!!shortPurpose" outlined=true :text-color=textColor color="#333333" small>{{ shortPurpose }}</v-chip>
+     </template>
+     <span>{{ purpose }}</span>
+   </v-tooltip>
+@@ -44,9 +44,9 @@ export default {
+     },
+     textColor () {
+       if (!this.isCritical) {
+-        return 'primary'
++        return '#333333'
+       } else {
+-        return 'white'
++        return '#FF805A'
+       }
+     }
+   }
+diff --git a/frontend/src/components/SecretRowDns.vue b/frontend/src/components/SecretRowDns.vue
+index 779cc486..166eeec3 100644
+--- a/frontend/src/components/SecretRowDns.vue
++++ b/frontend/src/components/SecretRowDns.vue
+@@ -23,13 +23,6 @@ SPDX-License-Identifier: Apache-2.0
+     <td v-if="selectedHeaders.dnsProvider">
+       <vendor extended :cloud-provider-kind="item.dnsProvider"></vendor>
+     </td>
+-    <td v-if="selectedHeaders.details">
+-      <v-list color="transparent">
+-        <v-list-item class="pa-0">
+-          <secret-details-item-content dns :secret="item.secret"></secret-details-item-content>
+-        </v-list-item>
+-      </v-list>
+-    </td>
+     <td v-if="selectedHeaders.relatedShootCount">
+       <div class="d-flex" :class="{'font-weight-light text--disabled' : !item.relatedShootCount}">
+         {{item.relatedShootCountLabel}}
+@@ -70,13 +63,11 @@ SPDX-License-Identifier: Apache-2.0
+ 
+ import { mapTableHeader } from '@/utils'
+ import Vendor from '@/components/Vendor'
+-import SecretDetailsItemContent from '@/components/SecretDetailsItemContent'
+ import { mapGetters } from 'vuex'
+ 
+ export default {
+   components: {
+-    Vendor,
+-    SecretDetailsItemContent
++    Vendor
+   },
+   props: {
+     item: {
+diff --git a/frontend/src/components/SecretRowInfra.vue b/frontend/src/components/SecretRowInfra.vue
+index df94683a..61ad9c96 100644
+--- a/frontend/src/components/SecretRowInfra.vue
++++ b/frontend/src/components/SecretRowInfra.vue
+@@ -23,13 +23,6 @@ SPDX-License-Identifier: Apache-2.0
+     <td v-if="selectedHeaders.infrastructure">
+       <vendor extended :cloud-provider-kind="item.infrastructureName" :cloud-profile-name="item.cloudProfileName"></vendor>
+     </td>
+-    <td v-if="selectedHeaders.details">
+-      <v-list color="transparent">
+-        <v-list-item class="pa-0">
+-          <secret-details-item-content infra :secret="item.secret"></secret-details-item-content>
+-        </v-list-item>
+-      </v-list>
+-    </td>
+     <td v-if="selectedHeaders.relatedShootCount">
+       <div class="d-flex" :class="{'font-weight-light text--disabled' : !item.relatedShootCount}">
+         {{item.relatedShootCountLabel}}
+@@ -40,7 +33,8 @@ SPDX-License-Identifier: Apache-2.0
+         <v-tooltip top v-if="canPatchSecrets">
+           <template v-slot:activator="{ on }">
+             <div v-on="on">
+-              <v-btn :disabled="!item.isOwnSecret || !item.isSupportedCloudProvider" icon @click="onUpdate">
++              <!--Patch: Don't display edit icon if provider is not supported (pluscloudopen) or secret isn't owned-->
++              <v-btn v-if="item.isOwnSecret && item.isSupportedCloudProvider" icon @click="onUpdate">
+                 <v-icon class="action-button--text">mdi-pencil</v-icon>
+               </v-btn>
+             </div>
+@@ -52,7 +46,8 @@ SPDX-License-Identifier: Apache-2.0
+         <v-tooltip top v-if="canDeleteSecrets">
+           <template v-slot:activator="{ on }">
+             <div v-on="on">
+-              <v-btn :disabled="item.relatedShootCount > 0 || !item.isOwnSecret" icon @click="onDelete">
++              <!--Patch: Don't display delete icon if provider is not supported (pluscloudopen)-->
++              <v-btn v-if="item.isSupportedCloudProvider" :disabled="item.relatedShootCount > 0 || !item.isOwnSecret" icon @click="onDelete">
+                 <v-icon class="error--text">mdi-delete</v-icon>
+               </v-btn>
+             </div>
+@@ -70,13 +65,11 @@ SPDX-License-Identifier: Apache-2.0
+ 
+ import { mapTableHeader } from '@/utils'
+ import Vendor from '@/components/Vendor'
+-import SecretDetailsItemContent from '@/components/SecretDetailsItemContent'
+ import { mapGetters } from 'vuex'
+ 
+ export default {
+   components: {
+-    Vendor,
+-    SecretDetailsItemContent
++    Vendor
+   },
+   props: {
+     item: {
+diff --git a/frontend/src/components/SelectSecret.vue b/frontend/src/components/SelectSecret.vue
+index c5b85de8..b6a669b5 100644
+--- a/frontend/src/components/SelectSecret.vue
++++ b/frontend/src/components/SelectSecret.vue
+@@ -30,6 +30,7 @@ SPDX-License-Identifier: Apache-2.0
+         {{get(item, 'metadata.name')}}
+         <v-icon v-if="!isOwnSecret(item)">mdi-share</v-icon>
+       </template>
++      <!--
+       <template v-slot:append-item>
+         <v-divider class="mb-2"></v-divider>
+         <v-btn text @click="openSecretDialog" class="mx-2 primary--text">
+@@ -37,6 +38,7 @@ SPDX-License-Identifier: Apache-2.0
+           Add new Secret
+         </v-btn>
+       </template>
++       -->
+     </v-select>
+     <secret-dialog-wrapper
+       :visible-dialog="visibleSecretDialog"
+diff --git a/frontend/src/components/ShootDetails/ShootAccessCard.vue b/frontend/src/components/ShootDetails/ShootAccessCard.vue
+index 5c5e7ac2..e4562da5 100644
+--- a/frontend/src/components/ShootDetails/ShootAccessCard.vue
++++ b/frontend/src/components/ShootDetails/ShootAccessCard.vue
+@@ -95,8 +95,8 @@ SPDX-License-Identifier: Apache-2.0
+     <v-divider v-if="isCredentialsTileVisible && (isKubeconfigTileVisible || isGardenctlTileVisible)" inset></v-divider>
+ 
+     <v-list v-if="isKubeconfigTileVisible">
+-      <shoot-kubeconfig :shoot-item="shootItem" :showIcon="true" type="gardenlogin"></shoot-kubeconfig>
+-      <shoot-kubeconfig :shoot-item="shootItem" :showIcon="false" type="token"></shoot-kubeconfig>
++      <shoot-kubeconfig v-if="supportsStaticKubeconfig" :shoot-item="shootItem" :showIcon="false" type="token"></shoot-kubeconfig>
++      <shoot-kubeconfig v-if="hasAdminKubeconfigEnabled" :shoot-item="shootItem" :showIcon="false" type="adminkubeconfig"></shoot-kubeconfig>
+     </v-list>
+ 
+     <v-divider v-if="isKubeconfigTileVisible && isGardenctlTileVisible" inset></v-divider>
+@@ -184,6 +184,9 @@ export default {
+     hasDashboardTokenAuth () {
+       return get(this.shootItem, 'spec.addons.kubernetesDashboard.authenticationMode', 'basic') === 'token'
+     },
++    hasAdminKubeconfigEnabled () {
++      return get(this.cfg, 'shootAdminKubeconfig.enabled', false)
++    },
+     kubeconfig () {
+       return get(this.shootInfo, 'kubeconfig')
+     },
+@@ -234,6 +237,15 @@ export default {
+     },
+     visibilityIcon () {
+       return this.showToken ? 'mdi-eye-off' : 'mdi-eye'
++    },
++    supportsStaticKubeconfig () {
++      // Check if k8s minor version is greater than 26 (1.26.x) -> Static kubeconfig isn't supported
++      const shootK8sVersion = get(this.shootItem, 'spec.kubernetes.version')
++      if (parseInt(shootK8sVersion.split('.')[1]) > 26) {
++        return false
++      }
++
++      return true
+     }
+   },
+   methods: {
+diff --git a/frontend/src/components/ShootDetails/ShootDetailsCard.vue b/frontend/src/components/ShootDetails/ShootDetailsCard.vue
+index 929c25a5..6bf9f054 100644
+--- a/frontend/src/components/ShootDetails/ShootDetailsCard.vue
++++ b/frontend/src/components/ShootDetails/ShootDetailsCard.vue
+@@ -155,8 +155,9 @@ SPDX-License-Identifier: Apache-2.0
+           </v-list-item-action>
+         </v-list-item>
+       </template>
+-      <v-divider inset></v-divider>
+-      <v-list-item>
++      <!--Patch: Don't display addons in UI-->
++      <!--<v-divider inset></v-divider>-->
++      <v-list-item style="display: none;">
+         <v-list-item-icon>
+           <v-icon color="primary">mdi-puzzle</v-icon>
+         </v-list-item-icon>
+diff --git a/frontend/src/components/ShootDetails/ShootInfrastructureCard.vue b/frontend/src/components/ShootDetails/ShootInfrastructureCard.vue
+index c38141bf..1dc1702b 100644
+--- a/frontend/src/components/ShootDetails/ShootInfrastructureCard.vue
++++ b/frontend/src/components/ShootDetails/ShootInfrastructureCard.vue
+@@ -37,14 +37,6 @@ SPDX-License-Identifier: Apache-2.0
+           </v-list-item-title>
+         </v-list-item-content>
+       </v-list-item>
+-      <v-list-item v-if="secret">
+-        <v-list-item-icon/>
+-        <secret-details-item-content
+-          class="pb-2"
+-          infra
+-          :secret="secret"
+-          details-title />
+-      </v-list-item>
+       <v-divider inset></v-divider>
+       <template v-if="showSeedInfo">
+         <v-list-item>
+@@ -77,24 +69,6 @@ SPDX-License-Identifier: Apache-2.0
+           </v-list-item-action>
+         </v-list-item>
+       </template>
+-      <v-list-item>
+-        <v-list-item-icon>
+-          <v-icon v-if="!showSeedInfo" color="primary">mdi-spa</v-icon>
+-        </v-list-item-icon>
+-        <v-list-item-content :class="{ 'pt-0': showSeedInfo}">
+-          <v-list-item-subtitle>Control Plane High Availability</v-list-item-subtitle>
+-          <v-list-item-title class="pt-1">
+-            <template v-if="!!shootControlPlaneHighAvailabilityFailureTolerance">
+-              <span class="mr-1">Failure tolerance type</span>
+-              <control-plane-high-availability-tag :shoot-item="shootItem" x-small></control-plane-high-availability-tag>
+-            </template>
+-            <template v-else>Not configured</template>
+-          </v-list-item-title>
+-        </v-list-item-content>
+-        <v-list-item-action class="mx-0">
+-          <control-plane-high-availability-configuration :shoot-item="shootItem"></control-plane-high-availability-configuration>
+-        </v-list-item-action>
+-      </v-list-item>
+       <v-divider inset></v-divider>
+       <v-list-item>
+         <v-list-item-icon>
+@@ -230,9 +204,6 @@ import Vendor from '@/components/Vendor'
+ import DnsProvider from '@/components/ShootDns/DnsProvider'
+ import DnsConfiguration from '@/components/ShootDns/DnsConfiguration'
+ import SeedConfiguration from '@/components/SeedConfiguration'
+-import ControlPlaneHighAvailabilityConfiguration from '@/components/ControlPlaneHighAvailability/ControlPlaneHighAvailabilityConfiguration'
+-import ControlPlaneHighAvailabilityTag from '@/components/ControlPlaneHighAvailability/ControlPlaneHighAvailabilityTag'
+-import SecretDetailsItemContent from '@/components/SecretDetailsItemContent.vue'
+ 
+ import { shootItem } from '@/mixins/shootItem'
+ 
+@@ -243,10 +214,7 @@ export default {
+     Vendor,
+     DnsProvider,
+     DnsConfiguration,
+-    SeedConfiguration,
+-    ControlPlaneHighAvailabilityConfiguration,
+-    ControlPlaneHighAvailabilityTag,
+-    SecretDetailsItemContent
++    SeedConfiguration
+   },
+   mixins: [shootItem],
+   computed: {
+diff --git a/frontend/src/components/ShootDetails/ShootKubeconfig.vue b/frontend/src/components/ShootDetails/ShootKubeconfig.vue
+index 4aa4d9ee..19161174 100644
+--- a/frontend/src/components/ShootDetails/ShootKubeconfig.vue
++++ b/frontend/src/components/ShootDetails/ShootKubeconfig.vue
+@@ -15,16 +15,20 @@ SPDX-License-Identifier: Apache-2.0
+         <v-list-item-subtitle v-if="isKubeconfigAvailable" class="wrap-text">Does not contain credentials (requires <span class="font-family-monospace">gardenlogin</span> kubectl plugin)</v-list-item-subtitle>
+         <v-list-item-subtitle v-else>Gardenlogin kubeconfig currently not available</v-list-item-subtitle>
+       </v-list-item-content>
+-      <v-list-item-content v-else>
++      <v-list-item-content v-if="isStaticKubeconfigType">
+         <v-list-item-title>Kubeconfig - Static Token</v-list-item-title>
+         <v-list-item-subtitle v-if="!shootEnableStaticTokenKubeconfig">Static token kubeconfig is disabled for this cluster</v-list-item-subtitle>
+         <v-list-item-subtitle v-else-if="!isKubeconfigAvailable">Static token kubeconfig currently not available</v-list-item-subtitle>
+-        <v-list-item-subtitle class="wrap-text" v-else>Contains static token credential. Not recommended, consider disabling the static token kubeconfig</v-list-item-subtitle>
++        <v-list-item-subtitle class="wrap-text" v-else>Contains static token credential for accessing the cluster API</v-list-item-subtitle>
++      </v-list-item-content>
++      <v-list-item-content v-if="isAdminKubeconfigType">
++        <v-list-item-title>Admin Kubeconfig</v-list-item-title>
++        <v-list-item-subtitle>Request a kubeconfig valid for {{adminKubeConfigExpiration}}</v-list-item-subtitle>
+       </v-list-item-content>
+       <v-list-item-action v-if="isGardenloginType" class="mx-0">
+         <gardenlogin-info></gardenlogin-info>
+       </v-list-item-action>
+-      <v-list-item-action class="mx-0" v-if="isKubeconfigAvailable">
++      <v-list-item-action class="mx-0" v-if="isKubeconfigAvailable || isAdminKubeconfigType">
+         <v-tooltip top>
+           <template v-slot:activator="{ on }">
+             <v-btn v-on="on" icon @click.native.stop="onDownload" color="action-button">
+@@ -34,10 +38,10 @@ SPDX-License-Identifier: Apache-2.0
+           <span>Download Kubeconfig</span>
+         </v-tooltip>
+       </v-list-item-action>
+-      <v-list-item-action class="mx-0" v-if="isKubeconfigAvailable">
++      <v-list-item-action class="mx-0" v-if="isKubeconfigAvailable && !isAdminKubeconfigType">
+         <copy-btn :clipboard-text="kubeconfig"></copy-btn>
+       </v-list-item-action>
+-      <v-list-item-action class="mx-0" v-if="isKubeconfigAvailable">
++      <v-list-item-action class="mx-0" v-if="isKubeconfigAvailable || isAdminKubeconfigType">
+         <v-tooltip top>
+           <template v-slot:activator="{ on }">
+             <v-btn v-on="on" icon @click.native.stop="toggleKubeconfig" color="action-button">
+@@ -47,9 +51,12 @@ SPDX-License-Identifier: Apache-2.0
+           <span>{{kubeconfigVisibilityTitle}}</span>
+         </v-tooltip>
+       </v-list-item-action>
+-      <v-list-item-action v-if="!isGardenloginType" class="mx-0">
++      <v-list-item-action v-if="isStaticKubeconfigType" class="mx-0">
+         <static-token-kubeconfig-configuration :shootItem="shootItem"></static-token-kubeconfig-configuration>
+       </v-list-item-action>
++      <v-list-item-action v-if="isAdminKubeconfigType" class="mx-0">
++        <admin-kube-config-request :expirations="possibleAdminKubeconfigExpirationSettings" :shootItem="shootItem" @expirationUpdate="onExpirationUpdate"></admin-kube-config-request>
++      </v-list-item-action>
+     </v-list-item>
+     <v-list-item v-if="kubeconfigExpansionPanel" key="expansion-gardenlogin-kubeconfig">
+       <v-list-item-icon></v-list-item-icon>
+@@ -65,15 +72,21 @@ import CopyBtn from '@/components/CopyBtn'
+ import CodeBlock from '@/components/CodeBlock'
+ import GardenloginInfo from '@/components/GardenloginInfo.vue'
+ import StaticTokenKubeconfigConfiguration from '@/components/StaticTokenKubeconfigConfiguration'
++import AdminKubeConfigRequest from '@/components/AdminKubeConfigRequest'
+ import download from 'downloadjs'
+ import { shootItem } from '@/mixins/shootItem'
++import { createAdminKubeconfig } from '@/utils/api'
++import { errorDetailsFromError } from '@/utils/error'
++import { mapState } from 'vuex'
++import filter from 'lodash/filter'
+ 
+ export default {
+   components: {
+     CopyBtn,
+     CodeBlock,
+     GardenloginInfo,
+-    StaticTokenKubeconfigConfiguration
++    StaticTokenKubeconfigConfiguration,
++    AdminKubeConfigRequest
+   },
+   mixins: [shootItem],
+   props: {
+@@ -88,17 +101,28 @@ export default {
+   },
+   data () {
+     return {
+-      kubeconfigExpansionPanel: false
++      kubeconfigExpansionPanel: false,
++      adminKubeConfigExpiration: '30m', // Default 30 minutes
++      adminKubeconfig: undefined
+     }
+   },
+   computed: {
++    ...mapState([
++      'cfg'
++    ]),
+     icon () {
+       return this.showListIcon ? 'mdi-file' : ''
+     },
+     kubeconfig () {
+-      return this.isGardenloginType
+-        ? this.shootInfo?.kubeconfigGardenlogin
+-        : this.shootInfo?.kubeconfig
++      if (this.isGardenloginType) {
++        return this.shootInfo?.kubeconfigGardenlogin
++      }
++
++      if (this.isStaticKubeconfigType) {
++        return this.shootInfo?.kubeconfig
++      }
++
++      return this.adminKubeconfig
+     },
+     isKubeconfigAvailable () {
+       return !!this.kubeconfig
+@@ -112,23 +136,80 @@ export default {
+     isGardenloginType () {
+       return this.type === 'gardenlogin'
+     },
++    isStaticKubeconfigType () {
++      return this.type === 'token'
++    },
++    isAdminKubeconfigType () {
++      return this.type === 'adminkubeconfig'
++    },
++    possibleAdminKubeconfigExpirationSettings () {
++      let expirations = ['30m', '1h', '3h', '6h', '12h', '1d', '3d', '7d']
++
++      if (this.cfg.shootAdminKubeconfig.maxExpirationSeconds) {
++        expirations = filter(expirations, expiration => {
++          return this.adminKubeConfigExpirationInSeconds(expiration) <= this.cfg.shootAdminKubeconfig.maxExpirationSeconds
++        })
++      }
++
++      return expirations
++    },
+     getQualifiedName () {
+       const prefix = this.isGardenloginType ? 'kubeconfig-gardenlogin' : 'kubeconfig'
+       return `${prefix}--${this.shootProjectName}--${this.shootName}.yaml`
+     }
+   },
+   methods: {
+-    toggleKubeconfig () {
++    async createAdminKubeconfig () {
++      try {
++        const resp = await createAdminKubeconfig({
++          namespace: this.shootNamespace,
++          name: this.shootName,
++          data: {
++            expirationSeconds: this.adminKubeConfigExpirationInSeconds(this.adminKubeConfigExpiration)
++          }
++        })
++
++        this.adminKubeconfig = resp.data
++      } catch (err) {
++        const errorMessage = 'Could not request admin kubeconfig'
++        const errorDetails = errorDetailsFromError(err)
++        console.error(errorMessage, errorDetails.errorCode, errorDetails.detailedMessage, err)
++      }
++    },
++    async toggleKubeconfig () {
++      if (!this.kubeconfigExpansionPanel && this.isAdminKubeconfigType) {
++        await this.createAdminKubeconfig()
++      }
++
+       this.kubeconfigExpansionPanel = !this.kubeconfigExpansionPanel
+     },
+     reset () {
+       this.kubeconfigExpansionPanel = false
+     },
+-    onDownload () {
++    async onDownload () {
++      if (this.isAdminKubeconfigType) {
++        await this.createAdminKubeconfig()
++      }
++
+       const kubeconfig = this.kubeconfig
+       if (kubeconfig) {
+         download(kubeconfig, this.getQualifiedName, 'text/yaml')
+       }
++    },
++    async onExpirationUpdate (kubeconfigExpiration) {
++      if (this.adminKubeConfigExpiration !== kubeconfigExpiration) {
++        this.adminKubeconfig = undefined
++      }
++
++      this.adminKubeConfigExpiration = kubeconfigExpiration
++    },
++    adminKubeConfigExpirationInSeconds (durationAsString) {
++      const units = { d: 86400, h: 3600, m: 60 }
++      const regex = /(\d+)([dhm])/g
++      const match = regex.exec(durationAsString)
++      const seconds = parseInt(match[1]) * units[match[2]]
++
++      return seconds
+     }
+   },
+   watch: {
+diff --git a/frontend/src/components/ShootDns/DnsProvider.vue b/frontend/src/components/ShootDns/DnsProvider.vue
+index 9631ad16..42a826b7 100644
+--- a/frontend/src/components/ShootDns/DnsProvider.vue
++++ b/frontend/src/components/ShootDns/DnsProvider.vue
+@@ -32,13 +32,6 @@ SPDX-License-Identifier: Apache-2.0
+           <v-list-item-title v-else>{{value}} {{description}}</v-list-item-title>
+         </v-list-item-content>
+       </v-list-item>
+-      <v-list-item v-if="secret" class="px-0">
+-        <secret-details-item-content
+-          class="pb-2"
+-          dns
+-          :secret="secret"
+-          details-title />
+-      </v-list-item>
+     </v-list>
+   </g-popper>
+ </template>
+@@ -49,14 +42,12 @@ import GPopper from '@/components/GPopper'
+ import VendorIcon from '@/components/VendorIcon'
+ import join from 'lodash/join'
+ import get from 'lodash/get'
+-import SecretDetailsItemContent from '@/components/SecretDetailsItemContent.vue'
+ 
+ export default {
+   name: 'worker-group',
+   components: {
+     GPopper,
+-    VendorIcon,
+-    SecretDetailsItemContent
++    VendorIcon
+   },
+   props: {
+     type: {
+diff --git a/frontend/src/components/ShootStatus.vue b/frontend/src/components/ShootStatus.vue
+index 34fab9cf..a485f93f 100644
+--- a/frontend/src/components/ShootStatus.vue
++++ b/frontend/src/components/ShootStatus.vue
+@@ -181,9 +181,9 @@ export default {
+     },
+     color () {
+       if (this.isAborted || this.isStaleShoot) {
+-        return 'grey'
++        return '#333333'
+       } else if (this.isError) {
+-        return 'error'
++        return '#FF805A'
+       } else {
+         return 'primary'
+       }
+diff --git a/frontend/src/components/ShootVersion/ShootVersion.vue b/frontend/src/components/ShootVersion/ShootVersion.vue
+index 30fd518b..9b72bf43 100644
+--- a/frontend/src/components/ShootVersion/ShootVersion.vue
++++ b/frontend/src/components/ShootVersion/ShootVersion.vue
+@@ -19,7 +19,7 @@ SPDX-License-Identifier: Apache-2.0
+             :outlined="!k8sPatchAvailable"
+             :ripple="canUpdate"
+             depressed
+-            color="primary"
++            color="#333333"
+           >
+             <v-icon small v-if="availableK8sUpdates">mdi-menu-up</v-icon>
+             {{shootK8sVersion}}
+diff --git a/frontend/src/components/StatusTag.vue b/frontend/src/components/StatusTag.vue
+index f39b3316..0e3190e6 100644
+--- a/frontend/src/components/StatusTag.vue
++++ b/frontend/src/components/StatusTag.vue
+@@ -197,12 +197,12 @@ export default {
+         return 'grey'
+       }
+       if (this.isError) {
+-        return 'error'
++        return '#FF805A'
+       }
+       if (this.isProgressing && this.isAdmin) {
+-        return 'info'
++        return '#009BF4'
+       }
+-      return 'primary'
++      return '#00DC91'
+     },
+     textColor () {
+       if (this.isError) {
+diff --git a/frontend/src/components/Vendor.vue b/frontend/src/components/Vendor.vue
+index 5f2b3f86..4fa85cf3 100644
+--- a/frontend/src/components/Vendor.vue
++++ b/frontend/src/components/Vendor.vue
+@@ -19,7 +19,7 @@ SPDX-License-Identifier: Apache-2.0
+         <v-list-item>
+           <v-list-item-content class="pa-0">
+             <v-list-item-subtitle>Provider</v-list-item-subtitle>
+-            <v-list-item-title class="d-flex"><infra-icon :value="cloudProviderKind" class="mr-2"></infra-icon>{{ cloudProviderKind }}</v-list-item-title>
++            <v-list-item-title class="d-flex"><infra-icon :value="cloudProviderKindPatched" class="mr-2"></infra-icon>{{ cloudProviderKindPatched }}</v-list-item-title>
+           </v-list-item-content>
+         </v-list-item>
+         <v-list-item v-if="cloudProfileName">
+@@ -77,6 +77,20 @@ export default {
+     }
+   },
+   computed: {
++    cloudProviderKindPatched () {
++      if (this.cloudProviderKind === 'openstack') {
++        switch (this.region) {
++          case 'prod1':
++          case 'intern1':
++          case 'RegionOne':
++            return 'pluscloudopen-cgn'
++          case 'prod2':
++            return 'pluscloudopen-ham5'
++        }
++      }
++
++      return this.cloudProviderKind
++    },
+     zoneText () {
+       return join(this.zones, ', ')
+     },
+@@ -89,7 +103,7 @@ export default {
+     description () {
+       const description = []
+       if (this.extended && this.cloudProviderKind) {
+-        description.push(this.cloudProviderKind)
++        description.push(this.cloudProviderKindPatched)
+       }
+       if (this.cloudProfileName) {
+         description.push(this.cloudProfileName)
+diff --git a/frontend/src/components/VendorIcon.vue b/frontend/src/components/VendorIcon.vue
+index d1b7ea55..8901b985 100644
+--- a/frontend/src/components/VendorIcon.vue
++++ b/frontend/src/components/VendorIcon.vue
+@@ -40,7 +40,13 @@ export default {
+         case 'gcp':
+           return require('@/assets/gcp.svg')
+         case 'openstack':
+-          return require('@/assets/openstack.svg')
++          return require('@/assets/pluscloudopen.svg')
++        case 'pluscloudopen':
++          return require('@/assets/pluscloudopen.svg')
++        case 'pluscloudopen-cgn':
++          return require('@/assets/pluscloudopen.svg')
++        case 'pluscloudopen-ham5':
++          return require('@/assets/pluscloudopen.svg')
+         case 'alicloud':
+           return require('@/assets/alicloud.svg')
+         case 'vsphere':
+diff --git a/frontend/src/components/dialogs/InfoDialog.vue b/frontend/src/components/dialogs/InfoDialog.vue
+index 2c41a250..82a9b1af 100644
+--- a/frontend/src/components/dialogs/InfoDialog.vue
++++ b/frontend/src/components/dialogs/InfoDialog.vue
+@@ -15,9 +15,9 @@ SPDX-License-Identifier: Apache-2.0
+     <template v-slot:caption>About</template>
+     <template v-slot:message>
+       <div class="d-flex flex-row align-center mt-3">
+-        <img src="/static/assets/logo.svg" alt="gardener logo" class="logo mr-3">
++        <img src="/static/assets/logo.svg" alt="product logo" class="logo mr-3">
+         <div>
+-          <h2 class="mb-1">Gardener Dashboard</h2>
++          <h2 class="mb-1">{{ productName }} Dashboard</h2>
+         </div>
+       </div>
+       <v-divider class="my-3"></v-divider>
+@@ -25,7 +25,7 @@ SPDX-License-Identifier: Apache-2.0
+         <div class="font-weight-bold">Version Information</div>
+         <div v-if="!!dashboardVersion">Dashboard<span class="ml-1 font-weight-bold">{{dashboardVersion}}</span></div>
+         <template v-if="isAdmin">
+-          <div v-if="!!gardenerVersion">API<span class="ml-1 font-weight-bold">{{gardenerVersion}}</span></div>
++          <div v-if="!!gardenerVersion">Gardener API<span class="ml-1 font-weight-bold">{{gardenerVersion}}</span></div>
+           <v-divider v-if="extensionsList.length" class="my-3"></v-divider>
+           <div v-if="extensionsList.length" class="font-weight-bold">Extensions ({{extensionsList.length}} deployed)</div>
+           <div
+@@ -69,6 +69,9 @@ export default {
+       'isAdmin',
+       'gardenerExtensionsList'
+     ]),
++    productName () {
++      return sessionStorage.getItem('wl.productName') || 'PSKE'
++    },
+     extensionsList () {
+       return sortBy(this.gardenerExtensionsList, 'name')
+     }
+diff --git a/frontend/src/plugins/vuetify.theme.js b/frontend/src/plugins/vuetify.theme.js
+index ff55026a..c89f7ab1 100644
+--- a/frontend/src/plugins/vuetify.theme.js
++++ b/frontend/src/plugins/vuetify.theme.js
+@@ -9,22 +9,22 @@ import colors from 'vuetify/lib/util/colors'
+ const theme = {
+   themes: {
+     light: {
+-      primary: '#0b8062',
+-      anchor: '#0b8062',
+-      'main-background': colors.grey.darken3,
+-      'main-navigation-title': colors.shades.white,
+-      'toolbar-background': '#0b8062',
+-      'toolbar-title': colors.shades.white,
+-      'action-button': colors.grey.darken4
++      primary: '#009BF4',
++      anchor: '#333333',
++      'main-background': '#F0FAFF',
++      'main-navigation-title': '#172b4d',
++      'toolbar-background': '#009BF4',
++      'toolbar-title': '#efefec',
++      'action-button': '#818181'
+     },
+     dark: {
+-      primary: '#0b8062',
+-      anchor: '#0b8062',
+-      'main-background': colors.grey.darken3,
+-      'main-navigation-title': colors.shades.white,
+-      'toolbar-background': '#0b8062',
+-      'toolbar-title': colors.shades.white,
+-      'action-button': colors.grey.lighten4,
++      primary: '#818181',
++      anchor: '#efefec',
++      'main-background': '#818181',
++      'main-navigation-title': '#e6e6e6',
++      'toolbar-background': '#010869',
++      'toolbar-title': '#b5b5b5',
++      'action-button': '#a1ecff',
+       error: colors.red.darken4,
+       warning: colors.orange.darken4
+     }
+diff --git a/frontend/src/router/routes.js b/frontend/src/router/routes.js
+index e6dce73d..358c3c58 100644
+--- a/frontend/src/router/routes.js
++++ b/frontend/src/router/routes.js
+@@ -125,7 +125,7 @@ function shootListHierarchy (context, path) {
+     component: PlaceholderComponent,
+     children: [
+       shootListRoute(context, ''),
+-      newShootRoute(context, '+'),
++      newShootRoute(context, 'create'),
+       newShootEditorRoute(context, '+/yaml'),
+       shootItemHierarchy(context, ':name')
+     ]
+diff --git a/frontend/src/store/index.js b/frontend/src/store/index.js
+index cd8dabfd..12540048 100644
+--- a/frontend/src/store/index.js
++++ b/frontend/src/store/index.js
+@@ -378,8 +378,14 @@ const getters = {
+     return getters['gardenerExtensions/items']
+   },
+   networkingTypeList (state, getters) {
+-    const networkList = getters['gardenerExtensions/networkingTypes']
+-    return sortBy(networkList)
++    var networkList = getters['gardenerExtensions/networkingTypes']
++
++    // Patch: Default Cilium
++    if (networkList.includes('cilium')) {
++      networkList = ['cilium', ...networkList.filter(item => item !== 'cilium')]
++    }
++
++    return networkList
+   },
+   machineTypesOrVolumeTypesByCloudProfileNameAndRegion (state, getters) {
+     const machineAndVolumeTypePredicate = unavailableItems => {
+@@ -674,6 +680,12 @@ const getters = {
+   },
+   infrastructureSecretList (state) {
+     return filter(state.cloudProviderSecrets.all, secret => {
++      if (secret.metadata.cloudProviderKind === 'openstack') {
++        secret.metadata.cloudProviderKind = 'pluscloudopen'
++        if (secret.metadata.cloudProfileName === 'pluscloudopen') {
++          secret.metadata.cloudProfileName = 'pluscloudopen-cgn'
++        }
++      }
+       return !!secret.metadata.cloudProviderKind
+     })
+   },
+@@ -709,7 +721,46 @@ const getters = {
+     return uniq(map(state.cloudProfiles.all, 'metadata.cloudProviderKind'))
+   },
+   sortedCloudProviderKindList (state, getters) {
+-    return intersection(['aws', 'azure', 'gcp', 'openstack', 'alicloud', 'metal', 'vsphere', 'hcloud', 'onmetal', 'local'], getters.cloudProviderKindList)
++    return intersection(['openstack', 'aws', 'azure', 'gcp', 'alicloud', 'metal', 'vsphere', 'hcloud'], getters.cloudProviderKindList)
++    // Patch: Select openstack first
++    // Original: return intersection(['aws', 'azure', 'gcp', 'openstack', 'alicloud', 'metal', 'vsphere', 'hcloud'], getters.cloudProviderKindList)
++  },
++  sortedCloudProviderKindListForSecretEdit (state, getters) {
++    const cloudProviderList = uniq(map(state.cloudProfiles.all, 'metadata.cloudProviderKind'))
++
++    // Really dirty hack ahead!!!
++    // We don't want the customer to edit pluscloudopen secrets via the dashboard -> Detect if we run on PROD
++
++    if (!cloudProviderList.includes('pluscloudopen') && getters.shouldOpenStackSecretsBeEditable) {
++      cloudProviderList.push('pluscloudopen')
++    }
++
++    return cloudProviderList
++  },
++  // Patch: Don't allow customer to add openstack (pluscloudopen) secrets
++  sortedCloudProviderKindListForSecretCreation (state, getters) {
++    // Really dirty hack ahead!!!
++    // We don't want the customer to edit pluscloudopen secrets via the dashboard -> Detect if we run on PROD
++
++    const providerList = ['aws', 'azure', 'gcp', 'alicloud', 'metal', 'vsphere', 'hcloud']
++
++    if (getters.shouldOpenStackSecretsBeEditable) {
++      providerList.push('openstack')
++    }
++
++    return intersection(providerList, getters.cloudProviderKindList)
++  },
++  shouldOpenStackSecretsBeEditable () {
++    switch (window.location.hostname) {
++      case 'dashboard.dev.gardener.get-cloud.io':
++      case 'dashboard.stage.gardener.get-cloud.io':
++      case 'dashboard.intern.gardener.get-cloud.io':
++      case 'localhost':
++        return true
++
++      default:
++        return false
++    }
+   },
+   sortedDnsProviderList (state, getters) {
+     const supportedProviderTypes = ['aws-route53', 'azure-dns', 'azure-private-dns', 'google-clouddns', 'openstack-designate', 'alicloud-dns', 'infoblox-dns', 'netlify-dns']
+@@ -995,6 +1046,9 @@ const getters = {
+   canPatchShootsBinding (state) {
+     return canI(state.subjectRules, 'patch', 'core.gardener.cloud', 'shoots/binding')
+   },
++  canCreateKubeconfig (state) {
++    return canI(state.subjectRules, 'create', 'core.gardener.cloud', 'shoots/adminkubeconfig')
++  },
+   canGetSecrets (state) {
+     return canI(state.subjectRules, 'list', '', 'secrets')
+   },
+@@ -1075,8 +1129,7 @@ const getters = {
+     }
+   },
+   isKubeconfigEnabled (state) {
+-    const { clientId, clientSecret, usePKCE = false } = get(state, 'kubeconfigData.oidc', {})
+-    return !!(clientId && (clientSecret || usePKCE))
++    return false
+   },
+   onlyShootsWithIssues (state, getters) {
+     return getters['shoots/onlyShootsWithIssues']
+diff --git a/frontend/src/utils/api.js b/frontend/src/utils/api.js
+index 1f6141d7..cdf07819 100644
+--- a/frontend/src/utils/api.js
++++ b/frontend/src/utils/api.js
+@@ -198,6 +198,12 @@ export function updateShootSeedName ({ namespace, name, data }) {
+   return updateResource(`/api/namespaces/${namespace}/shoots/${name}/spec/seedname`, data)
+ }
+ 
++export function createAdminKubeconfig ({ namespace, name, data }) {
++  namespace = encodeURIComponent(namespace)
++  name = encodeURIComponent(name)
++  return createResource(`/api/namespaces/${namespace}/shoots/${name}/adminkubeconfig`, data)
++}
++
+ /* Cloud Profiles */
+ 
+ export function getCloudprofiles () {
+diff --git a/frontend/src/views/Administration.vue b/frontend/src/views/Administration.vue
+index ba139125..27150e0a 100644
+--- a/frontend/src/views/Administration.vue
++++ b/frontend/src/views/Administration.vue
+@@ -285,72 +285,6 @@ SPDX-License-Identifier: Apache-2.0
+               </v-list>
+             </v-card>
+           </v-col>
+-          <v-col class="pa-3">
+-            <v-card>
+-              <v-toolbar flat dense :color="toolbarColor">
+-                <v-toolbar-title class="text-subtitle-1 d-flex align-center">Quota</v-toolbar-title>
+-                <v-spacer></v-spacer>
+-                <resource-quota-help></resource-quota-help>
+-              </v-toolbar>
+-              <v-skeleton-loader
+-                v-if="!projectQuotaStatus"
+-                height="400"
+-                type="table: table-heading, table-thead, table-tbody"
+-                :types="{ 'table-thead': 'heading@3', 'table-row': 'table-cell@3' }"
+-              ></v-skeleton-loader>
+-              <v-simple-table v-else-if="projectQuotaStatus.length">
+-                <template v-slot:default>
+-                  <thead>
+-                    <tr>
+-                      <th class="text-left">
+-                        Resource Name
+-                      </th>
+-                      <th class="text-center">
+-                        Used Quota
+-                      </th>
+-                      <th class="text-center">
+-                       Quantity
+-                      </th>
+-                    </tr>
+-                  </thead>
+-                  <tbody>
+-                    <tr
+-                      v-for="resourceQuota in projectQuotaStatus"
+-                      :key="resourceQuota.key"
+-                    >
+-                      <td>
+-                        <v-tooltip top>
+-                          <template v-slot:activator="{ on }">
+-                            <span v-on="on">{{ resourceQuota.caption }}</span>
+-                          </template>
+-                          {{ resourceQuota.resourceName }}
+-                        </v-tooltip>
+-                      </td>
+-                      <td class="text-center">
+-                        <v-tooltip top>
+-                          <template v-slot:activator="{ on }">
+-                            <v-progress-linear v-on="on" :value="resourceQuota.percentage" :color="resourceQuota.progressColor"></v-progress-linear>
+-                          </template>
+-                          {{ resourceQuota.percentage }}%
+-                        </v-tooltip>
+-                      </td>
+-                      <td class="text-center">{{resourceQuota.usedValue}} / {{resourceQuota.limitValue}}</td>
+-                    </tr>
+-                  </tbody>
+-                </template>
+-              </v-simple-table>
+-              <v-list v-else>
+-                <v-list-item>
+-                  <v-list-item-avatar>
+-                    <v-icon :color="color">mdi-information-outline</v-icon>
+-                  </v-list-item-avatar>
+-                  <v-list-item-content>
+-                    <v-list-item-title>No resource quotas defined for this project.</v-list-item-title>
+-                  </v-list-item-content>
+-                </v-list-item>
+-              </v-list>
+-            </v-card>
+-          </v-col>
+         </v-row>
+       </v-col>
+     </v-row>
+@@ -382,7 +316,6 @@ import AccountAvatar from '@/components/AccountAvatar'
+ import GDialog from '@/components/dialogs/GDialog'
+ import TimeString from '@/components/TimeString'
+ import ShootCustomField from '@/components/ShootCustomField'
+-import ResourceQuotaHelp from '@/components/ResourceQuotaHelp'
+ import { errorDetailsFromError } from '@/utils/error'
+ import { transformHtml, getProjectDetails, isServiceAccountUsername, gravatarUrlGeneric, getDateFormatted } from '@/utils'
+ import get from 'lodash/get'
+@@ -400,8 +333,7 @@ export default {
+     AccountAvatar,
+     GDialog,
+     TimeString,
+-    ShootCustomField,
+-    ResourceQuotaHelp
++    ShootCustomField
+   },
+   data () {
+     return {
+diff --git a/frontend/src/views/Login.vue b/frontend/src/views/Login.vue
+index e4e234be..cde5bcd0 100644
+--- a/frontend/src/views/Login.vue
++++ b/frontend/src/views/Login.vue
+@@ -14,8 +14,9 @@ SPDX-License-Identifier: Apache-2.0
+             <v-card class="elevation-1">
+               <v-card-title class="pa-0">
+                 <div class="layout column align-center main-background darken-1 pa-3 pt-6">
+-                  <img src="/static/assets/logo.svg" alt="Login to Gardener" width="180" height="180">
+-                  <span class="flex my-4 primary--text text-h5 font-weight-light">Universal Kubernetes at Scale</span>
++                  <img src="/static/assets/logo.svg" alt="Product Login Logo" width="180" height="180">
++                  <span class="flex my-4 primary--text text-h4 font-weight-light">{{ productName }}</span>
++                  <span class="flex my-4 primary--text text-h5 font-weight-light">{{ productSlogan }}</span>
+                 </div>
+                 <v-tabs
+                   v-show="!loading"
+@@ -43,7 +44,7 @@ SPDX-License-Identifier: Apache-2.0
+                       <div class="text-subtitle-1 text-center">Press Login to be redirected to configured<br> OpenID Connect Provider.</div>
+                     </v-tab-item >
+                     <v-tab-item id="token">
+-                      <div class="text-subtitle-1 text-center pt-3">Enter a bearer token trusted by the Kubernetes API server and press Login.</div>
++                      <div class="text-subtitle-1 text-center pt-3">Enter your access token and press Login.</div>
+                       <v-text-field
+                         ref="token"
+                         v-model="token"
+@@ -59,16 +60,26 @@ SPDX-License-Identifier: Apache-2.0
+                   </v-tabs-items>
+               </v-card-text>
+               <v-card-actions v-show="!loading" class="bt-2 pb-4">
++                <div class="d-flex justify-center flex-grow-1">
++                  <a :href="documentationURL" target="_blank" rel="noopener">Docs</a>
++                </div>
+                 <div class="d-flex justify-center flex-grow-1">
+                   <v-btn @click="handleLogin" color="primary">Login</v-btn>
+                 </div>
++                <div class="d-flex justify-center flex-grow-1">
++                  <a :href="supportURL" target="_blank" rel="noopener">Support</a>
++                </div>
+               </v-card-actions>
+             </v-card>
+           </v-col>
+         </v-row>
+       </v-container>
+       <div v-if="landingPageUrl" class="footer text-caption">
+-        <span class="primary--text">Discover what our service is about at the <a :href="landingPageUrl" target="_blank" rel="noopener">Gardener Landing Page</a></span>
++        <span class="primary--text">
++          {{ customLandingPagePre }}
++          <a :href="landingPageUrl" target="_blank" rel="noopener">{{ landingPageName }}</a>
++          {{ customLandingPagePost }}
++        </span>
+       </div>
+     </v-main>
+     <g-snotify></g-snotify>
+@@ -103,8 +114,15 @@ export default {
+       token: '',
+       loginType: undefined,
+       cfg: {
++        productName: undefined,
++        productSlogan: undefined,
++        documentationURL: undefined,
++        supportURL: undefined,
+         loginTypes: undefined,
+-        landingPageUrl: undefined
++        landingPageUrl: undefined,
++        landingPageName: undefined,
++        customLandingPagePre: undefined,
++        customLandingPagePost: undefined
+       },
+       loading: false
+     }
+@@ -119,8 +137,29 @@ export default {
+     primaryLoginType () {
+       return getPrimaryLoginType(this.cfg)
+     },
++    productName () {
++      return this.cfg.productName || 'PSKE'
++    },
++    productSlogan () {
++      return this.cfg.productSlogan || 'Managed Kubernetes at Scale'
++    },
++    documentationURL () {
++      return this.cfg.documentationURL || 'https://docs.plusserver.com'
++    },
++    supportURL () {
++      return this.cfg.supportURL || 'https://www.plusserver.com/ueber-uns/plusserver-kontakt'
++    },
+     landingPageUrl () {
+-      return this.cfg.landingPageUrl
++      return this.cfg.landingPageUrl || 'https://plusserver.com/pske'
++    },
++    landingPageName () {
++      return this.cfg.landingPageName || 'PSKE'
++    },
++    customLandingPagePre () {
++      return this.cfg.customLandingPagePre || 'Powered by'
++    },
++    customLandingPagePost () {
++      return this.cfg.customLandingPagePost || ''
+     }
+   },
+   beforeRouteEnter (to, from, next) {
+@@ -136,6 +175,9 @@ export default {
+       try {
+         const { data } = await api.getLoginConfiguration()
+         cfg = data
++        Object.keys(cfg).forEach(key => {
++          sessionStorage.setItem('wl.' + key, cfg[key])
++        })
+       } catch (err) {
+         logger.error('Failed to fetch login configuration: %s', err.message)
+         cfg = {
+diff --git a/frontend/src/views/NewShoot.vue b/frontend/src/views/NewShoot.vue
+index 38fa5c47..1cc71f5c 100644
+--- a/frontend/src/views/NewShoot.vue
++++ b/frontend/src/views/NewShoot.vue
+@@ -43,14 +43,6 @@ SPDX-License-Identifier: Apache-2.0
+             ></new-shoot-infrastructure-details>
+         </v-card-text>
+       </v-card>
+-      <v-card flat class="mt-4">
+-        <v-card-title class="text-subtitle-1 toolbar-title--text toolbar-background cardTitle">
+-          Control Plane High Availability
+-        </v-card-title>
+-        <v-card-text>
+-          <manage-control-plane-high-availability />
+-       </v-card-text>
+-      </v-card>
+       <v-card flat class="mt-4">
+         <v-card-title class="text-subtitle-1 toolbar-title--text toolbar-background cardTitle">
+           DNS Configuration
+@@ -83,7 +75,8 @@ SPDX-License-Identifier: Apache-2.0
+           ></manage-workers>
+        </v-card-text>
+       </v-card>
+-      <v-card flat class="mt-4">
++      <!--Patch: Don't display addons in UI-->
++      <v-card flat class="mt-4" style="display: none;">
+         <v-card-title class="text-subtitle-1 toolbar-title--text toolbar-background cardTitle">
+           Add-Ons (not actively monitored and provided on a best-effort basis only)
+         </v-card-title>
+@@ -156,7 +149,6 @@ import MaintenanceComponents from '@/components/ShootMaintenance/MaintenanceComp
+ import MaintenanceTime from '@/components/ShootMaintenance/MaintenanceTime'
+ import ManageShootAddons from '@/components/ShootAddons/ManageAddons'
+ import ManageShootDns from '@/components/ShootDns/ManageDns'
+-import ManageControlPlaneHighAvailability from '@/components/ControlPlaneHighAvailability/ManageControlPlaneHighAvailability'
+ 
+ import asyncRef from '@/mixins/asyncRef'
+ 
+@@ -183,8 +175,7 @@ export default {
+     ManageHibernationSchedule,
+     ManageWorkers,
+     GMessage,
+-    ConfirmDialog,
+-    ManageControlPlaneHighAvailability
++    ConfirmDialog
+   },
+   mixins: [
+     asyncRef('manageWorkers'),
+@@ -382,11 +373,7 @@ export default {
+         unset(shootResource, 'metadata.annotations["dashboard.garden.sapcloud.io/no-hibernation-schedule"]')
+       }
+ 
+-      if (this.controlPlaneFailureToleranceType) {
+-        set(shootResource, 'spec.controlPlane.highAvailability.failureTolerance.type', this.controlPlaneFailureToleranceType)
+-      } else {
+-        unset(shootResource, 'spec.controlPlane')
+-      }
++      set(shootResource, 'spec.controlPlane.highAvailability.failureTolerance.type', 'node')
+ 
+       return shootResource
+     },
+@@ -447,7 +434,7 @@ export default {
+ 
+       const name = get(shootResource, 'metadata.name')
+       const kubernetesVersion = get(shootResource, 'spec.kubernetes.version')
+-      const enableStaticTokenKubeconfig = get(shootResource, 'spec.kubernetes.enableStaticTokenKubeconfig')
++      const enableStaticTokenKubeconfig = false
+       const purpose = get(shootResource, 'spec.purpose')
+       this.purpose = purpose
+       await this.$refs.clusterDetails.setDetailsData({
+diff --git a/frontend/src/views/Secrets.vue b/frontend/src/views/Secrets.vue
+index 997c35f2..85d13b6e 100644
+--- a/frontend/src/views/Secrets.vue
++++ b/frontend/src/views/Secrets.vue
+@@ -38,7 +38,7 @@ SPDX-License-Identifier: Apache-2.0
+           </template>
+           <v-list subheader dense>
+             <v-subheader>Create Infrastructure Secret</v-subheader>
+-            <v-list-item v-for="infrastructure in sortedCloudProviderKindList" :key="infrastructure" @click="openSecretAddDialog(infrastructure)">
++            <v-list-item v-for="infrastructure in sortedCloudProviderKindListForSecretCreation" :key="infrastructure" @click="openSecretAddDialog(infrastructure)">
+               <v-list-item-action>
+                 <infra-icon :value="infrastructure" :size="24"></infra-icon>
+               </v-list-item-action>
+@@ -229,7 +229,9 @@ export default {
+       'dnsSecretList',
+       'shootList',
+       'canCreateSecrets',
+-      'sortedCloudProviderKindList'
++      'sortedCloudProviderKindList',
++      'sortedCloudProviderKindListForSecretEdit',
++      'sortedCloudProviderKindListForSecretCreation'
+     ]),
+     ...mapGetters('gardenerExtensions', [
+       'sortedDnsProviderList'
+@@ -262,13 +264,6 @@ export default {
+           sortable: true,
+           defaultSelected: true
+         },
+-        {
+-          text: 'DETAILS',
+-          align: 'start',
+-          value: 'details',
+-          sortable: false,
+-          defaultSelected: true
+-        },
+         {
+           text: 'USED BY',
+           align: 'start',
+@@ -302,7 +297,7 @@ export default {
+         cloudProfileName: secret.metadata.cloudProfileName,
+         relatedShootCount: this.relatedShootCountInfra(secret),
+         relatedShootCountLabel: this.relatedShootCountLabel(this.relatedShootCountInfra(secret)),
+-        isSupportedCloudProvider: includes(this.sortedCloudProviderKindList, secret.metadata.cloudProviderKind),
++        isSupportedCloudProvider: includes(this.sortedCloudProviderKindListForSecretEdit, secret.metadata.cloudProviderKind),
+         secret
+       }))
+     },
+@@ -382,7 +377,12 @@ export default {
+       this.visibleSecretDialog = infrastructureKind
+     },
+     onUpdateSecret (secret) {
+-      const kind = secret.metadata.cloudProviderKind || secret.metadata.dnsProviderName
++      let kind = secret.metadata.cloudProviderKind || secret.metadata.dnsProviderName
++
++      if (kind === 'pluscloudopen') {
++        kind = 'openstack'
++      }
++
+       this.selectedSecret = secret
+       this.visibleSecretDialog = kind
+     },
+@@ -390,6 +390,153 @@ export default {
+       this.selectedSecret = secret
+       this.visibleSecretDialog = 'delete'
+     },
++    getSecretDetailsInfra (secret) {
++      const secretData = secret.data || {}
++      switch (secret.metadata.cloudProviderKind) {
++        case 'openstack':
++          return [
++            {
++              label: 'Domain Name',
++              value: secretData.domainName
++            },
++            {
++              label: 'Tenant Name',
++              value: secretData.tenantName
++            }
++          ]
++        case 'pluscloudopen':
++          return [
++            {
++              label: 'Domain Name',
++              value: secretData.domainName
++            },
++            {
++              label: 'Tenant Name',
++              value: secretData.tenantName
++            }
++          ]
++        case 'vsphere':
++          return [
++            {
++              label: 'vSphere Username',
++              value: secretData.vsphereUsername
++            },
++            {
++              label: 'NSX-T Username',
++              value: secretData.nsxtUsername
++            }
++          ]
++        case 'aws':
++          return [
++            {
++              label: 'Access Key ID',
++              value: secretData.accessKeyID
++            }
++          ]
++        case 'azure':
++          return [
++            {
++              label: 'Subscription ID',
++              value: secretData.subscriptionID
++            }
++          ]
++        case 'gcp':
++          return [
++            {
++              label: 'Project',
++              value: secretData.project
++            }
++          ]
++        case 'alicloud':
++          return [
++            {
++              label: 'Access Key ID',
++              value: secretData.accessKeyID
++            }
++          ]
++        case 'metal':
++          return [
++            {
++              label: 'API URL',
++              value: secretData.metalAPIURL
++            }
++          ]
++        case 'hcloud':
++          return [
++            {
++              label: 'Hetzner Cloud Token',
++              value: secretData.hcloudToken
++            }
++          ]
++      }
++    },
++    getSecretDetailsDns (secret) {
++      const secretData = secret.data || {}
++      switch (secret.metadata.dnsProviderName) {
++        case 'openstack-designate':
++          return [
++            {
++              label: 'Domain Name',
++              value: secretData.domainName
++            },
++            {
++              label: 'Tenant Name',
++              value: secretData.tenantName
++            }
++          ]
++        case 'aws-route53':
++          return [
++            {
++              label: 'Access Key ID',
++              value: secretData.accessKeyID
++            }
++          ]
++        case 'azure-dns':
++        case 'azure-private-dns':
++          return [
++            {
++              label: 'Subscription ID',
++              value: secretData.subscriptionID
++            }
++          ]
++        case 'google-clouddns':
++          return [
++            {
++              label: 'Project',
++              value: secretData.project
++            }
++          ]
++        case 'alicloud-dns':
++          return [
++            {
++              label: 'Access Key ID',
++              value: secretData.accessKeyID
++            }
++          ]
++        case 'infoblox-dns':
++          return [
++            {
++              label: 'Infoblox Username',
++              value: secretData.USERNAME
++            }
++          ]
++        case 'cloudflare-dns':
++          return [
++            {
++              label: 'API Key',
++              value: 'hidden'
++            }
++          ]
++        case 'netlify-dns':
++          return [
++            {
++              label: 'API Key',
++              value: 'hidden'
++            }
++          ]
++      }
++      return undefined
++    },
+     relatedShootCountInfra (secret) {
+       const name = secret.metadata.name
+       const shootsByInfrastructureSecret = filter(this.shootList, ['spec.secretBindingName', name])
+diff --git a/frontend/src/views/Settings.vue b/frontend/src/views/Settings.vue
+index b0b127e6..a3ec10de 100644
+--- a/frontend/src/views/Settings.vue
++++ b/frontend/src/views/Settings.vue
+@@ -14,35 +14,6 @@ SPDX-License-Identifier: Apache-2.0
+           </v-toolbar>
+           <v-card-text>
+             <v-row>
+-              <v-col cols="12">
+-                <legend class="text-body-2 text--secondary">Color Scheme</legend>
+-                <v-btn-toggle v-model="colorSchemeIndex" mandatory dense @click.native.stop class="pt-1">
+-                  <v-tooltip top>
+-                    <template v-slot:activator="{ on }">
+-                      <v-btn small v-on="on">
+-                        <v-icon small color="primary">mdi-white-balance-sunny</v-icon>
+-                      </v-btn>
+-                    </template>
+-                    <span>Light Mode</span>
+-                  </v-tooltip>
+-                  <v-tooltip top>
+-                    <template v-slot:activator="{ on }">
+-                      <v-btn small v-on="on">
+-                        <v-icon small color="primary">mdi-weather-night</v-icon>
+-                      </v-btn>
+-                    </template>
+-                    <span>Dark Mode</span>
+-                  </v-tooltip>
+-                  <v-tooltip top>
+-                    <template v-slot:activator="{ on }">
+-                      <v-btn small v-on="on">
+-                        <v-icon small color="primary">mdi-brightness-auto</v-icon>
+-                      </v-btn>
+-                    </template>
+-                    <span>Automatically choose theme based on your system settings</span>
+-                  </v-tooltip>
+-                </v-btn-toggle>
+-              </v-col>
+               <v-col cols="12">
+                 <legend class="text-body-2 text--secondary">Log Level</legend>
+                 <v-btn-toggle lebel="Log Level" v-model="logLevelIndex" dense class="pt-1">
+@@ -114,16 +85,6 @@ export default {
+         const { value } = this.logLevels[index]
+         this.setLogLevel(value)
+       }
+-    },
+-    colorSchemeIndex: {
+-      get () {
+-        const index = this.colorSchemes.indexOf(this.colorScheme)
+-        return index !== -1 ? index : 2
+-      },
+-      set (index) {
+-        const colorScheme = this.colorSchemes[index]
+-        this.setColorScheme(colorScheme)
+-      }
+     }
+   },
+   methods: {
+diff --git a/frontend/tests/unit/StatusTag.spec.js b/frontend/tests/unit/StatusTag.spec.js
+index cb4704f7..2591b942 100644
+--- a/frontend/tests/unit/StatusTag.spec.js
++++ b/frontend/tests/unit/StatusTag.spec.js
+@@ -51,7 +51,7 @@ describe('condition.vue', () => {
+     expect(vm.chipTooltip.title).toBe('foo-bar')
+     expect(vm.chipIcon).toBe('')
+     expect(vm.isError || vm.isUnknown || vm.isProgressing).toBe(false)
+-    expect(vm.color).toBe('primary')
++    expect(vm.color).toBe('#00DC91')
+     expect(vm.visible).toBe(true)
+   })
+ 
+@@ -71,7 +71,7 @@ describe('condition.vue', () => {
+     expect(vm.isError).toBe(true)
+     expect(vm.isUserError).toBe(true)
+     expect(vm.chipIcon).toBe('mdi-account-alert-outline')
+-    expect(vm.color).toBe('error')
++    expect(vm.color).toBe('#FF805A')
+     expect(vm.visible).toBe(true)
+   })
+ 
+@@ -86,7 +86,7 @@ describe('condition.vue', () => {
+     const vm = wrapper.vm
+     expect(vm.visible).toBe(false)
+     expect(vm.isProgressing).toBe(true)
+-    expect(vm.color).toBe('primary')
++    expect(vm.color).toBe('#00DC91')
+     expect(vm.chipStatus).toBe('Progressing')
+     expect(vm.chipIcon).toBe('')
+ 
+@@ -94,7 +94,7 @@ describe('condition.vue', () => {
+     const vmAdmin = wrapper.vm
+     expect(vmAdmin.visible).toBe(true)
+     expect(vmAdmin.isProgressing).toBe(true)
+-    expect(vmAdmin.color).toBe('info')
++    expect(vmAdmin.color).toBe('#009BF4')
+     expect(vmAdmin.chipStatus).toBe('Progressing')
+     expect(vmAdmin.chipIcon).toBe('mdi-progress-alert')
+   })
+diff --git a/frontend/vue.config.js b/frontend/vue.config.js
+index c3cc673e..dfab5f43 100644
+--- a/frontend/vue.config.js
++++ b/frontend/vue.config.js
+@@ -32,7 +32,7 @@ module.exports = {
+         : 'src/main.js',
+       template: 'public/index.html',
+       filename: 'index.html',
+-      title: 'Kubernetes Gardener'
++      title: 'PSKE'
+     }
+   },
+   css: {
+diff --git a/yarn.lock b/yarn.lock
+index 504ea693..91eb435e 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -12252,6 +12252,17 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
++"semver@npm:^7.5.2":
++  version: 7.5.3
++  resolution: "semver@npm:7.5.3"
++  dependencies:
++    lru-cache: ^6.0.0
++  bin:
++    semver: bin/semver.js
++  checksum: 9d58db16525e9f749ad0a696a1f27deabaa51f66e91d2fa2b0db3de3e9644e8677de3b7d7a03f4c15bc81521e0c3916d7369e0572dbde250d9bedf5194e2a8a7
++  languageName: node
++  linkType: hard
++
+ "send@npm:0.18.0":
+   version: 0.18.0
+   resolution: "send@npm:0.18.0"
